@@ -40,6 +40,7 @@ const {
     changeReputation,
     updateStoryBible,
     progressStoryQuest,
+    getClueGate,
     setSummary,
     getActiveSessionId,
 
@@ -169,7 +170,7 @@ const client = new OpenAI({
 // مدل از .env خوانده می‌شود (AI_MODEL). پیش‌فرض: DeepSeek V4 Flash رایگان Routeway
 const AI_MODEL =
     process.env.AI_MODEL ||
-    "gemma-4-26b-a4b-it-meromero:free";
+    "deepseek-v4-flash:free";
 
 
 /* =========================
@@ -1485,13 +1486,17 @@ app.post(
             ].join(" ");
 
 
+            const clueGate =
+                getClueGate(memory, message);
+
             const systemPrompt =
                 engine.buildSystemPrompt(
                     memory,
                     {
                         textPool,
                         dice,
-                        event: randomEvent
+                        event: randomEvent,
+                        gate: clueGate
                     }
                 );
 
@@ -1652,18 +1657,12 @@ app.post(
              * پیشروی کوئست اصلی: اگر سرنخ کلیدی مرحله پیدا شد، مرحله‌ی بعد باز می‌شود
              */
 
-            const changes = aiData.memory || {};
-            const evidence = [
-                typeof changes.importantEvent === "string"
-                    ? changes.importantEvent
-                    : JSON.stringify(changes.importantEvent || ""),
-                ...(Array.isArray(changes.addItems)
-                    ? changes.addItems.map(i => (i && (i.name || "")) + " " + (i && (i.description || "")))
-                    : [])
-            ];
-
             const storyProgress =
-                progressStoryQuest(evidence);
+                progressStoryQuest(clueGate, {
+                    clueIds: (aiData.memory?.storyBible?.clues || [])
+                        .map(c => String((c && c.id) || "")),
+                    narration: responseText
+                });
 
             if (storyProgress) {
 

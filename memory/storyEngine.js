@@ -186,9 +186,6 @@ function compactState(memory, textPool = "") {
     const currentWorld = world.getLocation(memory.location);
     const worldNeighbors = currentWorld ? world.neighbors(currentWorld.name) : [];
     const storyQuest = (memory.quests || []).find(q => q && q.storyQuest && !q.completed);
-    const stageClue = storyQuest && world.STAGE_CLUES
-        ? world.STAGE_CLUES[(Number(storyQuest.stage) || 1) - 1]
-        : null;
     const bible = memory.storyBible || {};
     const clues = (bible.clues || []).slice(-12)
         .map(c => `${c.id || "?"}|${c.title || "سرنخ"}|${c.status || "کشف‌شده"}|${c.details || ""}`)
@@ -206,7 +203,6 @@ function compactState(memory, textPool = "") {
         `مکان‌های اصلی جهان: ${world.WORLD_LOCATIONS.map(l => l.name).join("، ")}`,
         `مسیرهای مجاز از مکان فعلی: ${worldNeighbors.join("، ") || "—"}`,
         `مرحله‌ی فعلی داستان: ${storyQuest ? storyQuest.objective : "آزاد"}`,
-        `سرنخ کلیدی این مرحله: ${stageClue ? `id=${stageClue.id} (${stageClue.title}) — وقتی بازیکن واقعاً پیدایش کرد، دقیقاً با همین id در storyBible.clues ثبت کن` : "—"}`,
         `نوبت: ${turn + 1}`,
         `بازیکن: ${p.name || "؟"}|${p.class || "؟"}|سطح ${p.level}|HP ${p.hp}/${p.maxHp}|مانا ${p.mana}/${p.maxMana}|حمله ${p.attack}|دفاع ${p.defense}|طلا ${p.gold}`,
         `مکان: ${memory.location || "ناشناخته"}`,
@@ -241,8 +237,10 @@ const STATIC_RULES = `تو Game Master یک بازی RPG فارسی هستی.
 - به خلاصه‌ی داستان و رویدادهای مهم وفادار بمان و با آن‌ها تناقض ایجاد نکن.
 - کتاب مقدس داستان منبع حقیقت ساختاریافته است؛ سرنخ‌ها، رازها و تصمیم‌های ثبت‌شده را حذف یا بازنویسی نکن.
 - اگر بازیکن سرنخ مهمی پیدا کرد، تصمیم مهمی گرفت یا راز تازه‌ای آشکار شد، آن را با شناسه‌ی ثابت در storyBible ثبت کن.
-- پیشروی مأموریت اصلی را سرور انجام می‌دهد: وقتی بازیکن «سرنخ کلیدی این مرحله» را پیدا کرد، آن را با همان id داده‌شده در storyBible.clues ثبت کن؛ خودت مأموریت اصلی را در addQuests نساز و objective آن را تغییر نده.
-- سرنخ کلیدی را بی‌دلیل و زودتر از موقع به بازیکن نده؛ باید نتیجه‌ی جست‌وجو، پرس‌وجو یا تصمیم خود بازیکن باشد.
+- پیشروی مأموریت اصلی فقط دست سرور است. هر نوبت در بخش «وضعیت سرنخ اصلی این نوبت» به تو گفته می‌شود چه مقدار از حقیقت را می‌توانی فاش کنی؛ دقیقاً از همان پیروی کن.
+- اگر گفته شد «مجاز به آشکار کردن»، حقیقت داده‌شده را بدون تغییر محتوا و به شکلی طبیعی در روایت فاش کن و id آن را در storyBible.clues بنویس.
+- اگر گفته شد «فقط نیمه‌سرنخ» یا «سرنخ اصلی اینجا نیست»، حقیقت را فاش نکن، معنای نشانه را حدس نزن و جواب قطعی نده؛ فقط فضا، تردید، نیمه‌سرنخ یا اشاره به مکان درست بده.
+- خودت مأموریت اصلی را در addQuests نساز و objective آن را تغییر نده. سرنخ‌های اصلی را به‌جای دیگری نسبت نده و حقیقتی متناقض با آن‌ها نساز.
 
 قانون ایموجی در روایت:
 - در متن داستان هرجا حس صحنه را بهتر می‌کند، از ایموجی مناسب و کم‌حجم استفاده کن (مثلاً مکان، خطر، احساسات، اشیاء).
@@ -338,12 +336,25 @@ const STATIC_RULES = `تو Game Master یک بازی RPG فارسی هستی.
 اگر دشمن هست:
 "combat": { "start": true, "enemy": { "name": "نام", "level": 1, "hp": 50, "attack": 10, "defense": 5, "description": "توضیح کوتاه" } }`;
 
-function buildDynamicContext(memory, { textPool, dice, event }) {
+function buildDynamicContext(memory, { textPool, dice, event, gate }) {
     const lines = [
         "=== وضعیت فعلی بازی ===",
         compactState(memory, textPool),
         `تاس این نوبت (d20): ${dice.roll}${dice.bonus ? ` + ${dice.bonus}` : ""} = ${dice.total} → ${dice.tier}`
     ];
+
+    if (gate) {
+        const c = gate.clue;
+        let rule;
+        if (gate.revealable) {
+            rule = `مجاز به آشکار کردن. حقیقت ثابت این مرحله: «${c.truth}» — id: ${c.id}`;
+        } else if (gate.atLocation) {
+            rule = `فقط نیمه‌سرنخ؛ هنوز حقیقت را فاش نکن. نشانه‌های قابل استفاده: ${c.hint}`;
+        } else {
+            rule = `سرنخ اصلی این مرحله اینجا نیست؛ حقیقت را فاش نکن. اگر طبیعی بود فقط اشاره کن که باید در ${c.locations.join(" یا ")} جست‌وجو کرد.`;
+        }
+        lines.push(`وضعیت سرنخ اصلی این نوبت: ${rule}`);
+    }
 
     if (event) {
         lines.push(`رویداد تصادفی این نوبت: ${event}`);
@@ -352,9 +363,9 @@ function buildDynamicContext(memory, { textPool, dice, event }) {
     return lines.join("\n");
 }
 
-function buildSystemPrompt(memory, { textPool, dice, event }) {
+function buildSystemPrompt(memory, { textPool, dice, event, gate }) {
     // ثابت اول، متغیر بعد
-    return `${STATIC_RULES}\n\n${buildDynamicContext(memory, { textPool, dice, event })}`;
+    return `${STATIC_RULES}\n\n${buildDynamicContext(memory, { textPool, dice, event, gate })}`;
 }
 
 /*

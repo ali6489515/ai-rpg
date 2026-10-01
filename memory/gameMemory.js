@@ -327,78 +327,106 @@ function textKey(value) {
     return world.locationKey(value);
 }
 
-function evidenceTexts(memory, extra = []) {
-    const bible = memory.storyBible || {};
-    const out = [];
-    for (const c of bible.clues || []) out.push(`${c.title || ""} ${c.details || ""}`);
-    for (const s of bible.secrets || []) out.push(`${s.title || ""} ${s.details || ""}`);
-    for (const e of (memory.importantEvents || []).slice(-30)) {
-        out.push(typeof e === "string" ? e : JSON.stringify(e || ""));
-    }
-    for (const t of extra) if (t) out.push(String(t));
-    return out.map(textKey).filter(Boolean);
+const INVESTIGATE_RE = /(بررسی|(?<!بر)(?<!برمی\u200c)(?<!برمی)(?<!برمی )گرد|جست|گشت|کاو|وارسی|تحقیق|پرس|سوال|سؤال|حرف|صحبت|بخوان|بخونم|خواندن|نگاه|دقت|لمس|ردپا|رد پا|دنبال|معاینه|زیر و رو)/;
+
+function getStoryQuest(memory) {
+    return (memory && Array.isArray(memory.quests))
+        ? memory.quests.find(q => q && q.storyQuest)
+        : null;
 }
 
 /**
- * مرحله‌ی کوئست اصلی را با سرنخ‌های ثبت‌شده هماهنگ می‌کند. روی خود شیء memory کار می‌کند.
- * فقط سرنخ «مرحله‌ی فعلی» با کلمات کلیدی تشخیص داده می‌شود تا مرحله‌ای جا نیفتد.
- * خروجی: null یا { from, to, objective, completed, clueTitle }
+ * سرور (نه AI) تصمیم می‌گیرد سرنخ کلیدی این نوبت قابل آشکار شدن هست یا نه.
+ * شرط‌ها: بازیکن در یکی از مکان‌های مرحله باشد، واقعاً تحقیق کند،
+ * و به حداقل تعداد نوبتِ تحقیق آن مرحله رسیده باشد.
  */
-function syncStoryQuest(memory, extraEvidence = []) {
-    if (!memory || !Array.isArray(memory.quests)) return null;
-    const quest = memory.quests.find(q => q && q.storyQuest);
+function getClueGate(memory, message) {
+    const quest = getStoryQuest(memory);
     if (!quest || quest.completed) return null;
+    const stage = Math.min(Math.max(Number(quest.stage) || 1, 1), world.STAGE_CLUES.length);
+    const clue = world.STAGE_CLUES[stage - 1];
+    if (!clue) return null;
 
-    const stages = world.MAIN_STORY.stages;
-    const keys = world.STAGE_CLUES;
-    memory.storyBible = normalizeStoryBible(memory.storyBible);
-    const bible = memory.storyBible;
-    const texts = evidenceTexts(memory, extraEvidence);
+    const here = textKey(memory.location);
+    const atLocation = clue.locations.some(l => textKey(l) === here);
+    const investigating = INVESTIGATE_RE.test(String(message || ""));
+    const progress = Number(quest.stageProgress) || 0;
+    const revealable = atLocation && investigating && progress + 1 >= clue.minTurns;
 
-    const from = Math.min(Math.max(Number(quest.stage) || 1, 1), stages.length);
-    let stage = from;
-    let completed = false;
-    let lastClue = null;
-
-    while (stage <= stages.length) {
-        const key = keys[stage - 1];
-        if (!key) break;
-        let found = bible.clues.some(c => c.id === key.id);
-        if (!found) {
-            const words = key.keywords.map(textKey);
-            const hit = texts.find(t => words.some(w => w && t.includes(w)));
-            if (hit) {
-                bible.clues.push({ id: key.id, title: key.title, status: "کشف‌شده", details: "به‌صورت خودکار از روایت تشخیص داده شد." });
-                found = true;
-            }
-        }
-        if (!found) break;
-        lastClue = key.title;
-        if (stage === stages.length) { completed = true; break; }
-        stage++;
-    }
-
-    quest.stage = stage;
-    quest.objective = stages[stage - 1];
-    quest.completed = completed;
-
-    if (stage === from && !completed) return null;
-    return { from, to: stage, objective: quest.objective, completed, clueTitle: lastClue };
+    return { stage, clue, atLocation, investigating, progress, revealable };
 }
 
-/** نسخه‌ی session-دار: بعد از اعمال تغییرات AI صدا زده می‌شود */
-function progressStoryQuest(extraEvidence = []) {
+/** شیء memory را بدون جلو بردن، با مرحله‌ی ذخیره‌شده هماهنگ می‌کند (برای سیوهای قدیمی) */
+function syncStoryQuest(memory) {
+    const quest = getStoryQuest(memory);
+    if (!quest) return null;
+    const stages = world.MAIN_STORY.stages;
+    const stage = Math.min(Math.max(Number(quest.stage) || 1, 1), stages.length);
+    quest.stage = stage;
+    quest.objective = stages[stage - 1];
+    quest.stageProgress = Number(quest.stageProgress) || 0;
+    return null;
+}
+
+/**
+ * بعد از جواب AI صدا زده می‌شود. حداکثر یک مرحله در هر نوبت جلو می‌رود و فقط اگر
+ * گیت باز بوده و AI واقعاً سرنخ را آشکار کرده باشد (id درست یا حقیقت کلیدی در روایت).
+ */
+function progressStoryQuest(gate, { clueIds = [], narration = "" } = {}) {
+    if (!gate) return null;
     const memory = loadPermanentMemory();
-    const result = syncStoryQuest(memory, extraEvidence);
-    if (result) {
-        const note = result.completed
-            ? `خط اصلی کامل شد: ${result.clueTitle}`
-            : `سرنخ کلیدی پیدا شد (${result.clueTitle}); مرحله‌ی ${result.to}: ${result.objective}`;
-        memory.importantEvents.push(note);
+    const quest = getStoryQuest(memory);
+    if (!quest || quest.completed || Number(quest.stage) !== gate.stage) return null;
+
+    if (gate.atLocation && gate.investigating) {
+        quest.stageProgress = (Number(quest.stageProgress) || 0) + 1;
+    }
+
+    let result = null;
+    const text = textKey(narration);
+    const revealed =
+        clueIds.includes(gate.clue.id) ||
+        gate.clue.keywords.some(k => text.includes(textKey(k)));
+
+    if (gate.revealable && revealed) {
+        memory.storyBible = normalizeStoryBible(memory.storyBible);
+        if (!memory.storyBible.clues.some(c => c.id === gate.clue.id)) {
+            memory.storyBible.clues.push({
+                id: gate.clue.id,
+                title: gate.clue.title,
+                status: "کشف‌شده",
+                details: gate.clue.truth
+            });
+        }
+
+        const stages = world.MAIN_STORY.stages;
+        if (gate.stage >= stages.length) {
+            quest.completed = true;
+        } else {
+            quest.stage = gate.stage + 1;
+            quest.objective = stages[quest.stage - 1];
+            quest.stageProgress = 0;
+            quest.stageStartTurn = Number(memory.turn) || 0;
+        }
+
+        result = {
+            from: gate.stage,
+            to: quest.stage,
+            objective: quest.objective,
+            completed: Boolean(quest.completed),
+            clueTitle: gate.clue.title
+        };
+
+        memory.importantEvents.push(
+            result.completed
+                ? `خط اصلی کامل شد: ${gate.clue.title}`
+                : `سرنخ کلیدی پیدا شد: ${gate.clue.title} — ${gate.clue.truth}`
+        );
         if (memory.importantEvents.length > 50) {
             memory.importantEvents.splice(0, memory.importantEvents.length - 50);
         }
     }
+
     savePermanentMemory(memory);
     return result;
 }
@@ -417,7 +445,10 @@ function updateStoryBible(patch, turn = 0) {
         }
         return Array.from(map.values()).slice(-100);
     };
-    current.clues = mergeById(current.clues, incoming.clues);
+    // سرنخ‌های خط اصلی (main_clue_*) فقط توسط سرور ثبت می‌شوند
+    const aiClues = (Array.isArray(incoming.clues) ? incoming.clues : [])
+        .filter(c => c && !/^main_clue_/i.test(String(c.id || "")));
+    current.clues = mergeById(current.clues, aiClues);
     current.decisions = mergeById(current.decisions, incoming.decisions);
     current.secrets = mergeById(current.secrets, incoming.secrets);
     if (incoming.flags && typeof incoming.flags === "object" && !Array.isArray(incoming.flags)) {
@@ -1026,6 +1057,7 @@ module.exports = {
     updateStoryBible,
     progressStoryQuest,
     syncStoryQuest,
+    getClueGate,
     setSummary,
     getActiveSessionId,
     createEmptyCombat,
