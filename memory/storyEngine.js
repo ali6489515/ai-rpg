@@ -332,7 +332,7 @@ const STATIC_RULES = `تو Game Master یک بازی RPG فارسی هستی.
 اگر دشمن هست:
 "combat": { "start": true, "enemy": { "name": "نام", "level": 1, "hp": 50, "attack": 10, "defense": 5, "description": "توضیح کوتاه" } }`;
 
-function buildDynamicContext(memory, { textPool, dice, event, gate }) {
+function buildDynamicContext(memory, { textPool, dice, event, gate, travel }) {
     const lines = [
         "=== وضعیت فعلی بازی ===",
         compactState(memory, textPool),
@@ -353,6 +353,10 @@ function buildDynamicContext(memory, { textPool, dice, event, gate }) {
         lines.push(`وضعیت سرنخ اصلی این نوبت: ${rule}`);
     }
 
+    if (travel) {
+        lines.push(`سفر این نوبت: بازیکن به «${travel}» می‌رود. رسیدنش را روایت کن و در memory.location دقیقاً «${travel}» را بنویس.`);
+    }
+
     if (event) {
         lines.push(`رویداد تصادفی این نوبت: ${event}`);
     }
@@ -360,9 +364,9 @@ function buildDynamicContext(memory, { textPool, dice, event, gate }) {
     return lines.join("\n");
 }
 
-function buildSystemPrompt(memory, { textPool, dice, event, gate }) {
+function buildSystemPrompt(memory, { textPool, dice, event, gate, travel }) {
     // ثابت اول، متغیر بعد
-    return `${STATIC_RULES}\n\n${buildDynamicContext(memory, { textPool, dice, event, gate })}`;
+    return `${STATIC_RULES}\n\n${buildDynamicContext(memory, { textPool, dice, event, gate, travel })}`;
 }
 
 /*
@@ -370,7 +374,7 @@ function buildSystemPrompt(memory, { textPool, dice, event, gate }) {
  * این یادآوری کوتاه به انتهای آخرین پیام بازیکن اضافه می‌شود (فقط در درخواست، نه در ذخیره).
  */
 const FORMAT_REMINDER =
-    `[یادآوری سیستم: ۱) اول روایت. ۲) اگر مبارزه شروع نمی‌شود، آخر روایت دو انتخاب با «🎯 انتخاب‌های پیش رو:» بنویس. ۳) بعد یک خط ${STATE_SEPARATOR} و سپس JSON. ` +
+    `[یادآوری سیستم: ۱) اول روایت. ۲) هیچ انتخاب یا گزینه‌ی شماره‌داری ننویس؛ سرور خودش انتخاب‌های مرتبط با مأموریت را اضافه می‌کند. ۳) بعد یک خط ${STATE_SEPARATOR} و سپس JSON. ` +
     `اگر بازیکن به دشمن حمله کرد یا دشمن به او حمله کرد، combat.start را true بگذار. جان و مانا را افزایش نده.]`;
 
 /**
@@ -527,20 +531,35 @@ async function consumeStream(stream, onDelta) {
     return full;
 }
 
-/* حذف بخش «انتخاب‌های پیش رو» و هر انتخاب‌های دیگری از انتهای روایت */
+/*
+ * حذف بلوک انتخاب‌های AI از انتهای روایت.
+ * نسخه‌ی قبلی هر جای ۵۰۰ کاراکتر آخر که کلمه‌ی «انتخاب» یا «🎯» می‌دید روایت را می‌برید؛
+ * این باعث می‌شد پیام «🎯 مأموریت جدید» و حتی جمله‌هایی مثل «قربانی از قبل انتخاب شده» پاک شوند.
+ */
 function stripChoices(text) {
-    const t = String(text).trim();
-    // علامت سرور
-    let idx = t.indexOf("🎯");
-    if (idx !== -1) return t.slice(0, idx).trim();
-    // علامت‌های دیگر انتخاب
-    idx = Math.max(
-        t.lastIndexOf("انتخاب"),
-        t.lastIndexOf("۱)"),
-        t.lastIndexOf("1)"),
-        t.lastIndexOf("choice")
-    );
-    if (idx > t.length - 500) return t.slice(0, idx).trim();
+    let t = String(text || "").trim();
+
+    // ۱) سرتیتر استاندارد انتخاب‌ها
+    const header = t.search(/(?:🎯\s*)?انتخاب(?:‌|\s)?های\s*پیش\s*رو\s*:?/);
+    if (header !== -1) {
+        return t.slice(0, header).trim();
+    }
+
+    // ۲) فهرست شماره‌دار در انتهای متن (۱) ... ۲) ...)
+    const lines = t.split("\n");
+    let end = lines.length;
+    while (end > 0 && !lines[end - 1].trim()) end--;
+    let i = end - 1;
+    // خط «یا کار دیگری انجام بده»
+    if (i >= 0 && /کار\s*دیگری/.test(lines[i])) i--;
+    let numbered = 0;
+    while (i >= 0 && /^\s*[-*•]?\s*[0-9۰-۹]\s*[\)\.\-]\s*\S/.test(lines[i])) {
+        numbered++;
+        i--;
+    }
+    if (numbered >= 2) {
+        return lines.slice(0, i + 1).join("\n").trim();
+    }
     return t;
 }
 
@@ -554,13 +573,23 @@ function hasChoices(text) {
     return /[۱1]\s*[\)\-\.]/.test(t) && /[۲2]\s*[\)\-\.]/.test(t);
 }
 
-function buildChoicesMessages(narration) {
+function buildChoicesMessages(narration, quests = [], location = "") {
+    const active = (Array.isArray(quests) ? quests : [])
+        .filter(q => q && !q.completed)
+        .slice(0, 4)
+        .map(q => `- ${q.name}: ${q.objective || q.description || ""}`)
+        .join("\n");
     return [
         {
             role: "system",
             content:
                 "تو دستیار یک بازی RPG فارسی هستی. روایت زیر تازه نوشته شده. " +
-                "دقیقاً دو انتخاب کوتاه (هرکدام حداکثر ۹ کلمه) و متفاوت برای ادامه‌ی بازیکن بنویس که با اتفاقات همین روایت جور باشد. " +
+                "دقیقاً دو انتخاب کوتاه (هرکدام حداکثر ۱۰ کلمه) و متفاوت برای ادامه‌ی بازیکن بنویس. " +
+                (active
+                    ? "هر دو انتخاب باید مستقیماً بازیکن را به انجام یکی از مأموریت‌های فعال زیر نزدیک‌تر کنند (رفتن به مکان لازم، پرسیدن از شخص مرتبط، بررسی سرنخ، تحویل آیتم و...). انتخاب بی‌ربط به مأموریت ننویس.\n" +
+                      `مأموریت‌های فعال:\n${active}\n`
+                    : "انتخاب‌ها باید با اتفاقات همین روایت جور باشند.\n") +
+                (location ? `مکان فعلی بازیکن: ${location}\n` : "") +
                 "فقط با این قالب و هیچ متن دیگری:\n" +
                 "🎯 انتخاب‌های پیش رو:\n۱) ...\n۲) ...\nیا کار دیگری انجام بده."
         },

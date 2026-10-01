@@ -57,6 +57,7 @@ const {
     resetCombatCombo,
     endCombat
 } = require("./memory/gameMemory");
+const questChoices = require("./memory/questChoices");
 
 const engine = require("./memory/storyEngine");
 
@@ -477,7 +478,8 @@ function applyMemoryChanges(memoryChanges, turn = 0) {
 
         const requestedLocation = memoryChanges.location.trim();
         const currentMemory = loadPermanentMemory();
-        const currentLocation = currentMemory.location;
+        // اگر بازیکن در زیرمکانی است، مکان اصلیِ والد ملاک مسیرهاست
+        const currentLocation = questChoices.effectiveWorldLocation(currentMemory);
         const targetWorldLocation = world.getLocation(requestedLocation);
 
         // مکان‌های اصلی جهان فقط از مسیرهای تعریف‌شده قابل دسترسی‌اند.
@@ -637,7 +639,21 @@ function applyMemoryChanges(memoryChanges, turn = 0) {
    دو انتخاب (جبران فراموشی مدل)
 ========================= */
 
-async function generateChoices(narration) {
+/*
+ * بلوک «🎯 انتخاب‌های پیش رو» بعد از هر نوبت.
+ * اولویت با خط اصلی (قطعی و سمت سرور)؛ اگر خط اصلی تمام شده باشد،
+ * AI با دانستن کوئست‌های فعال دو انتخاب مرتبط می‌سازد.
+ */
+async function buildChoicesBlock(narration) {
+    const memory = loadPermanentMemory();
+    const quest = questChoices.buildQuestChoices(memory);
+    if (quest && quest.choices.length >= 2) {
+        return questChoices.formatChoices(quest.choices);
+    }
+    return generateChoices(narration, memory);
+}
+
+async function generateChoices(narration, memory = null) {
 
     try {
 
@@ -648,7 +664,9 @@ async function generateChoices(narration) {
                     model: AI_MODEL,
                     messages:
                         engine.buildChoicesMessages(
-                            narration
+                            narration,
+                            memory?.quests || [],
+                            memory?.location || ""
                         ),
                     temperature: 0.7
                 }),
@@ -1267,7 +1285,7 @@ app.post(
             let introText =
                 `در ${startLocation} ایستاده‌ای. هوا آرام است، اما از دور بوی خاکستر می‌آید. چند روز پیش ${world.MAIN_STORY.title} با آتش‌گرفتن مرموز ${"مزرعهٔ سوخته"} آغاز شده است. فعلاً مقصدهای نزدیکت ${"جنگل مه‌گرفته"}، ${"مزرعهٔ سوخته"} و ${"بازار سرخ"} هستند.
 
-🎯 مأموریت آغازین: ${world.MAIN_STORY.stages[0]}
+📜 مأموریت آغازین: ${world.MAIN_STORY.stages[0]}
 
 هر راهی را که انتخاب کنی، داستان واکنش نشان می‌دهد؛ اما برای رسیدن به نقاط دورتر باید از مسیرهای جهان عبور کنی.`;
 
@@ -1288,14 +1306,8 @@ app.post(
 - حس شروع ماجراجویی بدهد
 - در متن از چند ایموجی مناسب صحنه استفاده کن (کم و بجا)
 - در صورت تمایل یک جمله‌ی کوتاه شک‌آمیز در پرانتز به‌عنوان «راوی مخالف» اضافه کن
-- در پایان دقیقاً دو انتخاب منطقی به بازیکن بده
-- بعد از دو انتخاب بنویس که می‌تواند کار دیگری هم انجام دهد
-
-فرمت پایان پیام:
-🎯 انتخاب‌های پیش رو:
-۱) ...
-۲) ...
-یا کار دیگری انجام بده.
+- به آتش‌سوزی مرموز «مزرعهٔ سوخته» اشاره کن تا بازیکن بداند مأموریتش از آنجا شروع می‌شود
+- هیچ انتخاب یا گزینه‌ی شماره‌داری ننویس؛ سرور انتخاب‌ها را اضافه می‌کند
 
 فقط متن داستان را برگردان.
 هیچ JSON، markdown یا توضیح اضافه ننویس.
@@ -1361,6 +1373,21 @@ app.post(
             }
 
 
+            // انتخاب‌های آغازین هم از مأموریت اصلی ساخته می‌شوند (مثلاً رفتن به مزرعهٔ سوخته)
+            introText =
+                engine.stripChoices(introText) || introText;
+
+            {
+                const introChoices =
+                    questChoices.buildQuestChoices(
+                        loadPermanentMemory()
+                    );
+                if (introChoices) {
+                    introText += `\n\n${questChoices.formatChoices(introChoices.choices)}`;
+                }
+            }
+
+
             addMessage(
                 "assistant",
                 introText
@@ -1417,10 +1444,24 @@ app.post(
 
         try {
 
-            const message =
+            let message =
                 String(
                     req.body?.message || ""
                 ).trim();
+
+
+            // اگر بازیکن فقط «۱» یا «۲» نوشت، متن همان انتخاب را به‌عنوان اقدام او در نظر بگیر
+            // (قبلاً «۱» مستقیم به AI می‌رفت، کلمه‌ی تحقیق نداشت و سرنخ هرگز باز نمی‌شد)
+            {
+                const resolvedChoice =
+                    questChoices.resolveNumericChoice(
+                        message,
+                        getMemory()
+                    );
+                if (resolvedChoice) {
+                    message = resolvedChoice;
+                }
+            }
 
 
             if (!message) {
@@ -1486,8 +1527,14 @@ app.post(
             ].join(" ");
 
 
+            // آیا بازیکن به یکی از مکان‌های مجاور سفر می‌کند؟
+            const travelTarget =
+                questChoices.detectTravelTarget(memory, message);
+
             const clueGate =
-                getClueGate(memory, message);
+                getClueGate(memory, message, {
+                    traveling: Boolean(travelTarget)
+                });
 
             const systemPrompt =
                 engine.buildSystemPrompt(
@@ -1496,7 +1543,8 @@ app.post(
                         textPool,
                         dice,
                         event: randomEvent,
-                        gate: clueGate
+                        gate: clueGate,
+                        travel: travelTarget
                     }
                 );
 
@@ -1601,6 +1649,12 @@ app.post(
                 ).trim();
 
 
+            // انتخاب‌های خود AI همیشه حذف می‌شوند؛ انتخاب‌های مرتبط با کوئست را سرور می‌سازد.
+            // (باید قبل از اضافه شدن پیام کوئست انجام شود تا آن پیام پاک نشود)
+            responseText =
+                engine.stripChoices(responseText) || responseText;
+
+
             if (!responseText) {
 
                 send({
@@ -1647,6 +1701,15 @@ app.post(
             );
 
 
+            // اگر بازیکن صریحاً به مکان مجاور رفت ولی AI فراموش کرد location را عوض کند
+            if (travelTarget) {
+                const afterTravel = loadPermanentMemory();
+                if (afterTravel.location !== travelTarget) {
+                    setLocation(travelTarget);
+                }
+            }
+
+
             if (randomEvent) {
 
                 markRandomEvent(turn);
@@ -1657,24 +1720,36 @@ app.post(
              * پیشروی کوئست اصلی: اگر سرنخ کلیدی مرحله پیدا شد، مرحله‌ی بعد باز می‌شود
              */
 
-            const storyProgress =
+            let storyProgress =
                 progressStoryQuest(clueGate, {
                     clueIds: (aiData.memory?.storyBible?.clues || [])
                         .map(c => String((c && c.id) || "")),
                     narration: responseText
                 });
 
-            // اگر بازیکن تحقیق کرد ولی AI سرنخ رو نگاه، هشدار
+            // گیت باز بود (بازیکن در مکان درست به اندازه‌ی کافی تحقیق کرد) ولی AI حقیقت را نگفت:
+            // سرور خودش سرنخ را آشکار می‌کند تا کوئست به‌خاطر فراموشی مدل گیر نکند.
+            if (clueGate && clueGate.revealable && !storyProgress) {
+                const reveal = `\n\n🔎 ${clueGate.clue.truth}`;
+                responseText += reveal;
+                send({ type: "delta", text: reveal });
+                storyProgress =
+                    progressStoryQuest(clueGate, {
+                        clueIds: [clueGate.clue.id],
+                        narration: responseText
+                    });
+            }
+
             if (clueGate && clueGate.atLocation && clueGate.investigating && !storyProgress) {
-                const hint = clueGate.clue.hint || clueGate.clue.truth;
-                responseText += `\n\n[سرور: بازیکن تحقیق کرد ولی سرنخ اصلی کشف نشد. AI احتمالاً سرنخ را دقیقاً بیان نکرد یا حقیقت متناقض گفت.]`;
+                // فقط لاگ سرور؛ پیام دیباگ نباید وسط روایت بازیکن بیاید
+                console.log(`Clue gate: stage ${clueGate.stage} investigated (progress ${clueGate.progress + 1}/${clueGate.clue.minTurns}), clue not revealed yet.`);
             }
 
             if (storyProgress) {
 
                 const questNote = storyProgress.completed
                     ? `\n\n🏆 خط اصلی «${world.MAIN_STORY.title}» کامل شد!`
-                    : `\n\n📜 سرنخ کلیدی پیدا شد: «${storyProgress.clueTitle}»\n🎯 مأموریت جدید: ${storyProgress.objective}`;
+                    : `\n\n📜 سرنخ کلیدی پیدا شد: «${storyProgress.clueTitle}»\n🧭 مأموریت جدید: ${storyProgress.objective}`;
 
                 responseText += questNote;
 
@@ -1725,21 +1800,16 @@ app.post(
 
 
             // انتخاب‌های مرتبط با کوئست فعلی (سرور تولید می‌کند)
+            // بر اساس مرحله‌ی کوئست + مکان فعلی بازیکن: یا تحقیق در مکان سرنخ، یا قدم بعدی مسیر به آن.
             if (!combatStarted) {
-                const storyQuest = memory.quests.find(q => q && q.storyQuest && !q.completed);
-                const stage = storyQuest ? Math.min(Math.max(Number(storyQuest.stage) || 1, 1), 7) : 1;
-                const serverChoices = world.STAGE_CHOICES && world.STAGE_CHOICES[stage];
-                
-                // انتخاب‌های AI را حذف کن
-                responseText = engine.stripChoices(responseText);
-                
-                // اگر انتخاب‌های سرور وجود دارد
-                if (serverChoices && Array.isArray(serverChoices) && serverChoices.length >= 2) {
-                    const choices = `🎯 انتخاب‌های پیش رو:\n۱) ${serverChoices[0]}\n۲) ${serverChoices[1]}\nیا کار دیگری انجام بده.`;
-                    responseText += `\n\n${choices}`;
+                const choicesBlock =
+                    await buildChoicesBlock(responseText);
+
+                if (choicesBlock) {
+                    responseText += `\n\n${choicesBlock}`;
                     send({
                         type: "delta",
-                        text: `\n\n${choices}`
+                        text: `\n\n${choicesBlock}`
                     });
                 }
             }
@@ -3979,58 +4049,16 @@ app.post(
                 return res.status(400).json({ error: "انتخاب ۱ یا ۲ را بده." });
             }
 
-            const memory = loadPermanentMemory();
-            const recentStory = getMemory();
-            const recent = Array.isArray(recentStory) ? recentStory.slice(-2) : [];
-            
-            let choicesText = "";
-            for (let i = recent.length - 1; i >= 0; i--) {
-                if (recent[i] && recent[i].role === "assistant") {
-                    choicesText = String(recent[i].content || "");
-                    break;
-                }
-            }
-
-            const lines = choicesText.split("\n");
-            let selectedChoice = "";
-            for (const line of lines) {
-                const match = line.match(new RegExp(`^\s*${num}\s*[\)\-\.]\s*(.+)`));
-                if (match) {
-                    selectedChoice = match[1].trim();
-                    break;
-                }
-            }
+            // متن انتخاب را برمی‌گرداند؛ کلاینت می‌تواند همان را به /message بفرستد.
+            // (/message خودش هم «۱» و «۲» را به متن انتخاب تبدیل می‌کند)
+            const selectedChoice =
+                questChoices.resolveNumericChoice(String(num), getMemory());
 
             if (!selectedChoice) {
                 return res.status(400).json({ error: `گزینه‌ی ${num} پیدا نشد.` });
             }
 
-            // انتخاب رو انگار پیام بازیکن فرستاده است
-            req.body.message = selectedChoice;
-
-            // /message endpoint رو بخوان
-            const { Router } = require("express");
-            const origUrl = req.url;
-            req.url = "/message";
-            req.method = "POST";
-            
-            // به بقیه router‌های message برسان
-            const originalEnd = res.end.bind(res);
-            let wrote = false;
-
-            res.write = function(chunk) {
-                wrote = true;
-                return originalEnd.call(res, chunk);
-            };
-
-            res.end = function(chunk) {
-                if (!wrote) return originalEnd.call(res, chunk);
-            };
-
-            // درخواست /message رو شبیه‌سازی کن - اما بهتر: مستقیماً فانکشن message رو بخوان
-            // این کار پیچیده است، بهتر است کاربر مستقیماً /message بزند
-            
-            return res.status(400).json({ error: "لطفاً انتخاب رو بنویس (copy/paste)." });
+            return res.json({ success: true, choice: selectedChoice });
 
         } catch (error) {
             console.error("/choice error:", error);

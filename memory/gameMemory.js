@@ -3,6 +3,7 @@ const path = require("path");
 const { AsyncLocalStorage } = require("async_hooks");
 const worldMap = require("./worldMap");
 const world = require("./world");
+const questChoices = require("./questChoices");
 
 let MongoClient = null;
 try {
@@ -360,16 +361,18 @@ function getStoryQuest(memory) {
  * شرط‌ها: بازیکن در یکی از مکان‌های مرحله باشد، واقعاً تحقیق کند،
  * و به حداقل تعداد نوبتِ تحقیق آن مرحله رسیده باشد.
  */
-function getClueGate(memory, message) {
+function getClueGate(memory, message, { traveling = false } = {}) {
     const quest = getStoryQuest(memory);
     if (!quest || quest.completed) return null;
     const stage = Math.min(Math.max(Number(quest.stage) || 1, 1), world.STAGE_CLUES.length);
     const clue = world.STAGE_CLUES[stage - 1];
     if (!clue) return null;
 
-    const here = textKey(memory.location);
+    // زیرمکان‌ها (مثلاً «کلبه‌ی شکارچی» داخل جنگل) هم جزو مکان اصلی حساب می‌شوند
+    const here = textKey(questChoices.effectiveWorldLocation(memory));
     const atLocation = clue.locations.some(l => textKey(l) === here);
-    const investigating = isInvestigating(message);
+    // نوبتی که بازیکن در حال سفر است تحقیق حساب نمی‌شود («برمی‌گردم» شامل «گرد» است)
+    const investigating = !traveling && isInvestigating(message);
     const progress = Number(quest.stageProgress) || 0;
     const revealable = atLocation && investigating && progress + 1 >= clue.minTurns;
 
@@ -778,6 +781,11 @@ function equipArmor(name, defense) {
 function setLocation(location, note = "") {
     const memory = loadPermanentMemory();
     memory.location = location;
+    const worldLoc = world.getLocation(location);
+    if (worldLoc) {
+        // آخرین مکان اصلی جهان؛ برای مسیر‌یابی و برگشت از زیرمکان‌ها
+        memory.lastWorldLocation = worldLoc.name;
+    }
     memory.map = worldMap.visit(
         worldMap.mergeMap(memory.map, location, memory.turn),
         location,
