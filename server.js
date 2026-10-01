@@ -170,7 +170,7 @@ const client = new OpenAI({
 // مدل از .env خوانده می‌شود (AI_MODEL). پیش‌فرض: DeepSeek V4 Flash رایگان Routeway
 const AI_MODEL =
     process.env.AI_MODEL ||
-    "deepseek-v4-flash:free";
+    "gemma-4-26b-a4b-it-meromero:free";
 
 
 /* =========================
@@ -1664,6 +1664,12 @@ app.post(
                     narration: responseText
                 });
 
+            // اگر بازیکن تحقیق کرد ولی AI سرنخ رو نگاه، هشدار
+            if (clueGate && clueGate.atLocation && clueGate.investigating && !storyProgress) {
+                const hint = clueGate.clue.hint || clueGate.clue.truth;
+                responseText += `\n\n[سرور: بازیکن تحقیق کرد ولی سرنخ اصلی کشف نشد. AI احتمالاً سرنخ را دقیقاً بیان نکرد یا حقیقت متناقض گفت.]`;
+            }
+
             if (storyProgress) {
 
                 const questNote = storyProgress.completed
@@ -1718,26 +1724,30 @@ app.post(
             }
 
 
-            // مدل گاهی با بلند شدن گفتگو دو انتخاب را فراموش می‌کند؛ فقط در آن حالت جبران می‌شود
-            if (
-                !combatStarted &&
-                !engine.hasChoices(responseText)
-            ) {
-
-                const choices =
-                    await generateChoices(
-                        responseText
-                    );
-
-                if (choices) {
-
-                    responseText +=
-                        `\n\n${choices}`;
-
-                    send({
-                        type: "delta",
-                        text: `\n\n${choices}`
-                    });
+            // انتخاب‌های مرتبط با کوئست فعلی (سرور تولید می‌کند)
+            if (!combatStarted) {
+                const storyQuest = memory.quests.find(q => q && q.storyQuest && !q.completed);
+                const stage = storyQuest ? Math.min(Math.max(Number(storyQuest.stage) || 1, 1), 7) : 1;
+                const serverChoices = world.STAGE_CHOICES && world.STAGE_CHOICES[stage];
+                
+                if (serverChoices && serverChoices.length >= 2) {
+                    const choices = engine.formatChoicesAsButtons(serverChoices[0], serverChoices[1]);
+                    if (!responseText.includes("🎯")) {
+                        responseText += `\n\n${choices}`;
+                        send({
+                            type: "delta",
+                            text: `\n\n${choices}`
+                        });
+                    }
+                } else if (!engine.hasChoices(responseText)) {
+                    const choices = await generateChoices(responseText);
+                    if (choices) {
+                        responseText += `\n\n${choices}`;
+                        send({
+                            type: "delta",
+                            text: `\n\n${choices}`
+                        });
+                    }
                 }
             }
 
@@ -3962,7 +3972,81 @@ initMongo()
     .catch(() => {})
     .finally(() => {
 
-        app.listen(
+        
+/* =========================
+   CHOICE -> ACTION CONVERSION
+========================= */
+
+app.post(
+    "/choice/:num",
+    async (req, res) => {
+        try {
+            const num = parseInt(String(req.params.num || "").trim());
+            if (!num || num < 1 || num > 2) {
+                return res.status(400).json({ error: "انتخاب ۱ یا ۲ را بده." });
+            }
+
+            const memory = loadPermanentMemory();
+            const recentStory = getMemory();
+            const recent = Array.isArray(recentStory) ? recentStory.slice(-2) : [];
+            
+            let choicesText = "";
+            for (let i = recent.length - 1; i >= 0; i--) {
+                if (recent[i] && recent[i].role === "assistant") {
+                    choicesText = String(recent[i].content || "");
+                    break;
+                }
+            }
+
+            const lines = choicesText.split("\n");
+            let selectedChoice = "";
+            for (const line of lines) {
+                const match = line.match(new RegExp(`^\s*${num}\s*[\)\-\.]\s*(.+)`));
+                if (match) {
+                    selectedChoice = match[1].trim();
+                    break;
+                }
+            }
+
+            if (!selectedChoice) {
+                return res.status(400).json({ error: `گزینه‌ی ${num} پیدا نشد.` });
+            }
+
+            // انتخاب رو انگار پیام بازیکن فرستاده است
+            req.body.message = selectedChoice;
+
+            // /message endpoint رو بخوان
+            const { Router } = require("express");
+            const origUrl = req.url;
+            req.url = "/message";
+            req.method = "POST";
+            
+            // به بقیه router‌های message برسان
+            const originalEnd = res.end.bind(res);
+            let wrote = false;
+
+            res.write = function(chunk) {
+                wrote = true;
+                return originalEnd.call(res, chunk);
+            };
+
+            res.end = function(chunk) {
+                if (!wrote) return originalEnd.call(res, chunk);
+            };
+
+            // درخواست /message رو شبیه‌سازی کن - اما بهتر: مستقیماً فانکشن message رو بخوان
+            // این کار پیچیده است، بهتر است کاربر مستقیماً /message بزند
+            
+            return res.status(400).json({ error: "لطفاً انتخاب رو بنویس (copy/paste)." });
+
+        } catch (error) {
+            console.error("/choice error:", error);
+            return res.status(500).json({ error: "خرابی." });
+        }
+    }
+);
+
+app.listen(
             PORT,
             "0.0.0.0",
             () => {

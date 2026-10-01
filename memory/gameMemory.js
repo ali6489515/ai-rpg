@@ -327,7 +327,27 @@ function textKey(value) {
     return world.locationKey(value);
 }
 
-const INVESTIGATE_RE = /(بررسی|(?<!بر)(?<!برمی\u200c)(?<!برمی)(?<!برمی )گرد|جست|گشت|کاو|وارسی|تحقیق|پرس|سوال|سؤال|حرف|صحبت|بخوان|بخونم|خواندن|نگاه|دقت|لمس|ردپا|رد پا|دنبال|معاینه|زیر و رو)/;
+const INVESTIGATE_KEYWORDS = [
+    "بررسی", "برسی", "بررسی‌", "برسی‌",
+    "گردم", "می‌گردم", "گرد", "گردن", "گشت", "می‌گشت", "گشتم",
+    "جست", "جستجو", "جستن", "می‌جست",
+    "کاوش", "می‌کاوم", "کاو", "کاوم",
+    "تحقیق", "تحقیق‌کن", "می‌کنم تحقیق",
+    "پرس", "پرسم", "می‌پرسم", "سوال", "سؤال", "می‌پرس",
+    "بخوان", "می‌خوانم", "خواندن", "خوندن",
+    "نگاه", "می‌نگرم", "نگرم",
+    "لمس", "می‌لمسم",
+    "ردپا", "رد پا", "دنبال", "دنبال کردن",
+    "معاینه", "زیر و رو", "تفتیش", "فحص"
+];
+
+function isInvestigating(message) {
+    if (!message) return false;
+    const text = String(message).toLowerCase();
+    return INVESTIGATE_KEYWORDS.some(kw => text.includes(kw.toLowerCase()));
+}
+
+const INVESTIGATE_RE = null; // استفاده‌ نشدنی; isInvestigating رو استفاده کن
 
 function getStoryQuest(memory) {
     return (memory && Array.isArray(memory.quests))
@@ -349,7 +369,7 @@ function getClueGate(memory, message) {
 
     const here = textKey(memory.location);
     const atLocation = clue.locations.some(l => textKey(l) === here);
-    const investigating = INVESTIGATE_RE.test(String(message || ""));
+    const investigating = isInvestigating(message);
     const progress = Number(quest.stageProgress) || 0;
     const revealable = atLocation && investigating && progress + 1 >= clue.minTurns;
 

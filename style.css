@@ -1907,3 +1907,26 @@ button:disabled {
     color: #ffffff;
     background: #4f46e5;
 }
+
+
+/* انتخاب‌های تعاملی */
+.choice-btn {
+    display: inline-block;
+    margin: 4px 0;
+    padding: 8px 12px;
+    background: #2a3f5f;
+    color: #fff;
+    border: 1px solid #0a9;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: background 0.2s;
+}
+
+.choice-btn:hover {
+    background: #1a5f8f;
+}
+
+.choice-btn:active {
+    background: #0a5f7f;
+}
