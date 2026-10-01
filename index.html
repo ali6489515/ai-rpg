@@ -1,0 +1,583 @@
+
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>افسانهٔ سایه‌ها</title>
+    <meta name="description" content="نقش‌آفرینی متنی فارسی با هوش مصنوعی. شخصیت بساز، دنیا را کاوش کن و داستان خودت را رقم بزن.">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div class="game-container">
+
+        <!-- ========================= -->
+        <!-- MAIN GAME -->
+        <!-- ========================= -->
+
+        <main class="game-main">
+
+            <header class="game-header">
+                <h1>⚔️ افسانهٔ سایه‌ها</h1>
+                <p>ماجراجویی‌ات از اینجا آغاز می‌شود...</p>
+            </header>
+
+
+            <!-- STATUS STRIP (همیشه در دید) -->
+
+            <section id="statusStrip" class="status-strip">
+
+                <div class="status-strip-identity">
+                    <strong id="stripName">-</strong>
+                    <span id="stripClass">-</span>
+                    <span class="status-chip">Lv <span id="stripLevel">1</span></span>
+                    <span class="status-chip gold-chip">💰 <span id="stripGold">100</span></span>
+                </div>
+
+                <div class="status-strip-bars">
+
+                    <div class="strip-bar-block">
+                        <div class="bar-label">
+                            <span>❤️ HP</span>
+                            <span id="stripHp">100 / 100</span>
+                        </div>
+                        <div class="status-bar strip-bar">
+                            <div id="stripHpBar" class="bar-fill hp-fill"></div>
+                        </div>
+                    </div>
+
+                    <div class="strip-bar-block">
+                        <div class="bar-label">
+                            <span>💙 Mana</span>
+                            <span id="stripMana">50 / 50</span>
+                        </div>
+                        <div class="status-bar strip-bar">
+                            <div id="stripManaBar" class="bar-fill mana-fill"></div>
+                        </div>
+                    </div>
+
+                    <div class="strip-bar-block">
+                        <div class="bar-label">
+                            <span>⭐ XP</span>
+                            <span id="stripXp">0 / 100</span>
+                        </div>
+                        <div class="status-bar strip-bar">
+                            <div id="stripXpBar" class="bar-fill xp-fill"></div>
+                        </div>
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- GAME LOG -->
+
+            <section id="gameLog" class="game-log">
+                <div class="system-message">
+                    🌟 به دنیای RPG خوش آمدید.
+                </div>
+
+                <div class="system-message">
+                    ابتدا شخصیت خود را بسازید.
+                </div>
+            </section>
+
+
+            <!-- CHARACTER CREATION -->
+
+            <section id="characterCreation" class="character-creation">
+
+                <h2>ساخت شخصیت</h2>
+
+                <form id="characterForm">
+
+                    <div class="input-group">
+
+                        <label for="characterName">
+                            نام شخصیت
+                        </label>
+
+                        <input
+                            type="text"
+                            id="characterName"
+                            placeholder="نام قهرمان..."
+                            maxlength="30"
+                            required
+                        >
+
+                    </div>
+
+
+                    <div class="input-group">
+                        <label>کلاس شخصیت</label>
+                        <input type="hidden" id="characterClass" value="warrior">
+                        <div class="class-cards" id="classCards">
+                            <button type="button" class="class-card selected" data-class="warrior">
+                                <div class="class-icon">⚔️</div>
+                                <div class="class-name">جنگجو</div>
+                                <div class="class-desc">خط مقدم نبرد</div>
+                                <div class="class-stats">جان بالا · حمله قوی</div>
+                            </button>
+                            <button type="button" class="class-card" data-class="mage">
+                                <div class="class-icon">🔮</div>
+                                <div class="class-name">جادوگر</div>
+                                <div class="class-desc">تسلط بر جادو</div>
+                                <div class="class-stats">مانای زیاد · مهارت‌های جادویی</div>
+                            </button>
+                            <button type="button" class="class-card" data-class="rogue">
+                                <div class="class-icon">🗡️</div>
+                                <div class="class-name">قاتل</div>
+                                <div class="class-desc">ضربه سریع و پنهان</div>
+                                <div class="class-stats">کریت بالا · چابک</div>
+                            </button>
+                        </div>
+                    </div>
+
+
+                    <button
+                        type="submit"
+                        id="createCharacterButton"
+                        class="primary-button"
+                    >
+                        شروع ماجراجویی
+                    </button>
+
+                </form>
+
+            </section>
+
+
+            <!-- MESSAGE INPUT -->
+
+            <section
+                id="messageSection"
+                class="message-section hidden"
+            >
+
+                <form id="messageForm">
+
+                    <input
+                        type="text"
+                        id="messageInput"
+                        placeholder="چه کاری انجام می‌دهی؟"
+                        autocomplete="off"
+                    >
+
+                    <button type="submit">
+                        ارسال
+                    </button>
+
+                </form>
+
+            </section>
+
+
+            <!-- ========================= -->
+            <!-- COMBAT -->
+            <!-- ========================= -->
+
+            <section
+                id="combatPanel"
+                class="combat-panel hidden"
+            >
+
+                <div class="combat-header">
+
+                    <span>⚔️ مبارزه</span>
+
+                    <span id="combatTurn">
+                        نوبت شما
+                    </span>
+
+                </div>
+
+
+                <div class="enemy-card">
+
+                    <h2 id="enemyName">
+                        Enemy
+                    </h2>
+
+                    <div class="enemy-level">
+                        Level <span id="enemyLevel">1</span>
+                    </div>
+
+
+                    <div class="hp-container">
+
+                        <div class="hp-label">
+                            <span>❤️ HP</span>
+
+                            <span id="enemyHp">
+                                0 / 0
+                            </span>
+                        </div>
+
+
+                        <div class="hp-bar">
+
+                            <div
+                                id="enemyHpBar"
+                                class="hp-fill enemy-hp"
+                            ></div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- COMBAT ACTIONS -->
+
+                <div
+                    id="combatActions"
+                    class="combat-actions"
+                >
+
+                    <button
+                        id="attackButton"
+                        class="combat-button attack"
+                    >
+                        ⚔️ حمله
+                    </button>
+
+
+                    <button
+                        id="skillButton"
+                        class="combat-button skill"
+                    >
+                        ✨ مهارت
+                    </button>
+
+
+                    <button
+                        id="defendButton"
+                        class="combat-button defend"
+                    >
+                        🛡️ دفاع
+                    </button>
+
+
+                    <button
+                        id="potionButton"
+                        class="combat-button potion"
+                    >
+                        🧪 معجون
+                    </button>
+
+
+                    <button
+                        id="runButton"
+                        class="combat-button run"
+                    >
+                        🏃 فرار
+                    </button>
+
+                </div>
+
+
+                <!-- انتخاب مهارت (دکمه‌ای) -->
+
+                <div
+                    id="skillSelectPanel"
+                    class="skill-select-panel hidden"
+                >
+
+                    <div class="skill-select-header">
+
+                        <span>✨ انتخاب مهارت</span>
+
+                        <button
+                            type="button"
+                            id="skillSelectClose"
+                            class="skill-select-close"
+                        >
+                            ✕
+                        </button>
+
+                    </div>
+
+                    <div
+                        id="skillSelectList"
+                        class="skill-select-list"
+                    ></div>
+
+                </div>
+
+
+                <!-- نوار زمان‌بندی حمله -->
+
+                <div
+                    id="timingPanel"
+                    class="timing-panel hidden"
+                >
+
+                    <div class="timing-hint">
+                        ⏱️ وقتی نشانگر روی سبز بود بزن!
+                    </div>
+
+                    <div
+                        id="timingTrack"
+                        class="timing-track"
+                    >
+                        <div
+                            id="timingMarker"
+                            class="timing-marker"
+                        ></div>
+                    </div>
+
+                    <button
+                        type="button"
+                        id="timingStopButton"
+                        class="timing-stop"
+                    >
+                        🎯 بزن!
+                    </button>
+
+                </div>
+
+
+                <div
+                    id="combatResult"
+                    class="combat-result"
+                ></div>
+
+            </section>
+
+        </main>
+
+
+        <!-- ========================= -->
+        <!-- SIDEBAR -->
+        <!-- ========================= -->
+
+        <aside class="sidebar">
+
+            <nav class="sidebar-tabs" id="sidebarTabs">
+                <button type="button" class="sidebar-tab active" data-tab="status">
+                    👤 وضعیت
+                </button>
+                <button type="button" class="sidebar-tab" data-tab="bag">
+                    🎒 کوله
+                </button>
+                <button type="button" class="sidebar-tab" data-tab="map">
+                    🗺️ نقشه
+                </button>
+                <button type="button" class="sidebar-tab" data-tab="shop" id="shopTabButton">
+                    🏪 فروشگاه
+                </button>
+            </nav>
+
+
+            <!-- TAB: STATUS -->
+
+            <div class="tab-panel active" id="tab-status">
+
+                <section class="panel panel-primary">
+
+                    <h2>👤 شخصیت</h2>
+
+                    <div class="player-name">
+                        <span id="playerName">-</span>
+                    </div>
+
+                    <div class="stat-row">
+                        <span>کلاس</span>
+                        <strong id="playerClass">-</strong>
+                    </div>
+
+                    <div class="stat-row">
+                        <span>Level</span>
+                        <strong id="playerLevel">1</strong>
+                    </div>
+
+                    <div class="bar-section">
+                        <div class="bar-label">
+                            <span>⭐ XP</span>
+                            <span id="playerXp">0 / 100</span>
+                        </div>
+                        <div class="status-bar">
+                            <div id="xpBar" class="bar-fill xp-fill"></div>
+                        </div>
+                    </div>
+
+                    <div class="bar-section">
+                        <div class="bar-label">
+                            <span>❤️ HP</span>
+                            <span id="playerHp">100 / 100</span>
+                        </div>
+                        <div class="status-bar">
+                            <div id="playerHpBar" class="bar-fill hp-fill"></div>
+                        </div>
+                    </div>
+
+                    <div class="bar-section">
+                        <div class="bar-label">
+                            <span>💙 Mana</span>
+                            <span id="playerMana">50 / 50</span>
+                        </div>
+                        <div class="status-bar">
+                            <div id="playerManaBar" class="bar-fill mana-fill"></div>
+                        </div>
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="small-stat">
+                            <span>⚔️ Attack</span>
+                            <strong id="playerAttack">15</strong>
+                        </div>
+                        <div class="small-stat">
+                            <span>🛡️ Defense</span>
+                            <strong id="playerDefense">5</strong>
+                        </div>
+                        <div class="small-stat">
+                            <span>🎯 Critical</span>
+                            <strong id="playerCritical">10%</strong>
+                        </div>
+                        <div class="small-stat">
+                            <span>💰 Gold</span>
+                            <strong id="playerGold">100</strong>
+                        </div>
+                    </div>
+
+                </section>
+
+                <section class="panel">
+                    <h2>📍 مکان</h2>
+                    <div id="playerLocation" class="location">
+                        دهکده‌ی آغازین
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <h2>📜 مأموریت‌ها</h2>
+                    <div id="questList" class="quest-list"></div>
+                </section>
+
+                <section class="panel panel-actions">
+                    <button id="restButton" class="rest-button">
+                        🛏️ استراحت و بازیابی
+                    </button>
+                    <button id="resetButton" class="reset-button">
+                        🔄 شروع بازی جدید
+                    </button>
+                </section>
+
+            </div>
+
+
+            <!-- TAB: MAP -->
+
+            <div class="tab-panel hidden" id="tab-map">
+
+                <section class="panel">
+                    <h2>🗺️ نقشه‌ی دنیا</h2>
+
+                    <div id="mapEmpty" class="map-empty hidden">
+                        هنوز مکانی کشف نشده است.
+                    </div>
+
+                    <div id="mapViewport" class="map-viewport">
+                        <svg id="mapSvg" class="map-svg" role="img" aria-label="نقشه‌ی مکان‌های کشف‌شده"></svg>
+                    </div>
+
+                    <div id="mapDetail" class="map-detail hidden"></div>
+                </section>
+
+            </div>
+
+
+            <!-- TAB: BAG -->
+
+            <div class="tab-panel hidden" id="tab-bag">
+
+                <section class="panel">
+                    <h2>🎒 Inventory</h2>
+                    <div id="inventoryList" class="inventory-list"></div>
+                </section>
+
+                <section class="panel">
+                    <h2>🛡️ تجهیزات</h2>
+                    <div id="equipmentList" class="equipment-list"></div>
+                </section>
+
+            </div>
+
+
+            <!-- TAB: SHOP -->
+
+            <div class="tab-panel hidden" id="tab-shop">
+
+                <section class="panel" id="shopPanel">
+                    <h2>🏪 فروشگاه</h2>
+                    <p class="shop-hint">فقط خارج از مبارزه می‌توانی خرید کنی.</p>
+                    <div class="shop-list">
+                        <button class="shop-item" data-shop="healthPotion">
+                            🧪 معجون درمان
+                            <span>25G</span>
+                        </button>
+                        <button class="shop-item" data-shop="manaPotion">
+                            💙 معجون مانا
+                            <span>25G</span>
+                        </button>
+                        <button class="shop-item" data-shop="ironSword">
+                            ⚔️ Iron Sword
+                            <span>150G</span>
+                        </button>
+                        <button class="shop-item" data-shop="steelArmor">
+                            🛡️ Steel Armor
+                            <span>150G</span>
+                        </button>
+                    </div>
+                </section>
+
+            </div>
+
+        </aside>
+
+    </div>
+
+
+    <!-- ناوبری موبایل: پنل جدا -->
+    <nav class="mobile-nav" id="mobileNav" aria-label="منوی موبایل">
+        <button type="button" class="mobile-nav-btn active" data-mobile-view="story">
+            <span class="mobile-nav-icon">📖</span>
+            <span>داستان</span>
+        </button>
+        <button type="button" class="mobile-nav-btn" data-mobile-view="status">
+            <span class="mobile-nav-icon">👤</span>
+            <span>وضعیت</span>
+        </button>
+        <button type="button" class="mobile-nav-btn" data-mobile-view="bag">
+            <span class="mobile-nav-icon">🎒</span>
+            <span>کوله</span>
+        </button>
+        <button type="button" class="mobile-nav-btn" data-mobile-view="map">
+            <span class="mobile-nav-icon">🗺️</span>
+            <span>نقشه</span>
+        </button>
+        <button type="button" class="mobile-nav-btn" data-mobile-view="shop" id="mobileShopTab">
+            <span class="mobile-nav-icon">🏪</span>
+            <span>فروشگاه</span>
+        </button>
+    </nav>
+
+
+    <script src="client.js"></script>
+
+</body>
+
+</html>
+

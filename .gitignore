@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Environment variables (NEVER commit the real key)
+.env
+.env.local
+.env.*.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
+
+# Optional: keep game saves local only (uncomment if you don't want to share state)
+# memory/game.json
+# memory/permanentMemory.json
+# memory/sessions/

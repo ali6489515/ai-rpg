@@ -1,0 +1,21 @@
+{
+  "name": "ai-rpg",
+  "version": "1.0.0",
+  "description": "AI-powered Persian RPG game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --check server.js && node --check memory/gameMemory.js && node --check memory/storyEngine.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@google/genai": "^2.24.0",
+    "dotenv": "^18.0.3",
+    "express": "^5.2.1",
+    "mongodb": "^6.12.0",
+    "openai": "^7.23.0"
+  }
+}
