@@ -1730,24 +1730,17 @@ app.post(
                 const stage = storyQuest ? Math.min(Math.max(Number(storyQuest.stage) || 1, 1), 7) : 1;
                 const serverChoices = world.STAGE_CHOICES && world.STAGE_CHOICES[stage];
                 
-                if (serverChoices && serverChoices.length >= 2) {
-                    const choices = engine.formatChoicesAsButtons(serverChoices[0], serverChoices[1]);
-                    if (!responseText.includes("🎯")) {
-                        responseText += `\n\n${choices}`;
-                        send({
-                            type: "delta",
-                            text: `\n\n${choices}`
-                        });
-                    }
-                } else if (!engine.hasChoices(responseText)) {
-                    const choices = await generateChoices(responseText);
-                    if (choices) {
-                        responseText += `\n\n${choices}`;
-                        send({
-                            type: "delta",
-                            text: `\n\n${choices}`
-                        });
-                    }
+                // انتخاب‌های AI را حذف کن
+                responseText = engine.stripChoices(responseText);
+                
+                // اگر انتخاب‌های سرور وجود دارد
+                if (serverChoices && Array.isArray(serverChoices) && serverChoices.length >= 2) {
+                    const choices = `🎯 انتخاب‌های پیش رو:\n۱) ${serverChoices[0]}\n۲) ${serverChoices[1]}\nیا کار دیگری انجام بده.`;
+                    responseText += `\n\n${choices}`;
+                    send({
+                        type: "delta",
+                        text: `\n\n${choices}`
+                    });
                 }
             }
 

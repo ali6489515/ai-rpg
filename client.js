@@ -1555,26 +1555,7 @@ function travelTo(name) {
 
     setMobileView("story");
 
-    // بررسی برای دکمه‌های انتخاب
-    const choiceButtons = document.querySelectorAll("[data-choice]");
-    if (choiceButtons.length) {
-        choiceButtons.forEach(btn => {
-            btn.addEventListener("click", (e) => {
-                e.preventDefault();
-                const choice = btn.getAttribute("data-choice");
-                if (choice) {
-                    messageInput.value = choice;
-                    if (typeof messageForm.requestSubmit === "function") {
-                        messageForm.requestSubmit();
-                    } else {
-                        messageForm.dispatchEvent(new Event("submit"));
-                    }
-                }
-            });
-        });
-    }
-
-    if (typeof messageForm.requestSubmit === "function") {
+if (typeof messageForm.requestSubmit === "function") {
 
         messageForm.requestSubmit();
 
