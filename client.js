@@ -346,8 +346,39 @@ const resetButton =
     getElement("resetButton");
 
 
-const shopButtons =
-    document.querySelectorAll("[data-shop]");
+// دکمه‌های فروشگاه دیگر ثابت نیستند؛ از /location-info ساخته می‌شوند
+const shopTitle =
+    getElement("shopTitle");
+
+const shopList =
+    getElement("shopList");
+
+const shopEmpty =
+    getElement("shopEmpty");
+
+const upgradeSection =
+    getElement("upgradeSection");
+
+const upgradeList =
+    getElement("upgradeList");
+
+const npcPanel =
+    getElement("npcPanel");
+
+const npcList =
+    getElement("npcList");
+
+const dangerInfo =
+    getElement("dangerInfo");
+
+const restHint =
+    getElement("restHint");
+
+const enemyBadge =
+    getElement("enemyBadge");
+
+const enemyDesc =
+    getElement("enemyDesc");
 
 
 // ==================================================
@@ -1134,6 +1165,8 @@ function updateQuests(quests, turn) {
 
 let lastInventory = [];
 
+let lastGameState = null;
+
 
 function updateGameUI(data) {
 
@@ -1149,6 +1182,9 @@ function updateGameUI(data) {
     if (Array.isArray(state.inventory)) {
         lastInventory = state.inventory;
     }
+
+    lastGameState =
+        state;
 
 
     updatePlayerUI(state);
@@ -1167,6 +1203,9 @@ function updateGameUI(data) {
     );
 
     renderMap(state);
+
+    // فروشگاه، NPCها، هزینه‌ی استراحت و خطرها به مکان/طلا/سطح وابسته‌اند
+    scheduleLocationRefresh();
 }
 
 
@@ -1572,6 +1611,678 @@ if (typeof messageForm.requestSubmit === "function") {
 
 
 // ==================================================
+// LOCATION INFO (فروشگاه، ارتقا، NPCها، خطر، استراحت)
+// ==================================================
+
+let lastLocationInfo = null;
+
+let locationRefreshTimer = null;
+
+let locationRequestId = 0;
+
+let shopLocked = false;
+
+
+const NPC_SERVICE_LABELS = {
+    shop: "🏪 فروشنده",
+    blacksmith: "🔨 آهنگر",
+    inn: "🛏️ مسافرخانه",
+    toll: "💰 عوارض"
+};
+
+
+function makeEl(tag, className, text) {
+
+    const el =
+        document.createElement(tag);
+
+    if (className) {
+        el.className = className;
+    }
+
+    if (
+        text !== undefined &&
+        text !== null
+    ) {
+        el.textContent = String(text);
+    }
+
+    return el;
+}
+
+
+/* چند فراخوانی پشت‌سرهم updateGameUI فقط یک درخواست بفرستد */
+function scheduleLocationRefresh() {
+
+    clearTimeout(locationRefreshTimer);
+
+    locationRefreshTimer =
+        setTimeout(
+            refreshLocationInfo,
+            120
+        );
+}
+
+
+async function refreshLocationInfo() {
+
+    clearTimeout(locationRefreshTimer);
+
+    const requestId =
+        ++locationRequestId;
+
+    try {
+
+        const data =
+            await request(
+                "/location-info"
+            );
+
+        // جواب قدیمی‌تر از درخواست جدیدتر را نادیده بگیر
+        if (
+            requestId !== locationRequestId ||
+            !data?.info
+        ) {
+            return;
+        }
+
+        lastLocationInfo =
+            data.info;
+
+        renderLocationInfo(
+            data.info,
+            Boolean(data.inCombat)
+        );
+
+    } catch (error) {
+
+        console.warn(
+            "location-info:",
+            error.message
+        );
+    }
+}
+
+
+function renderLocationInfo(info, inCombat) {
+
+    renderDanger(info);
+
+    renderNpcs(info.npcs);
+
+    renderShop(info.shop, inCombat);
+
+    renderUpgrades(info.upgrades, inCombat);
+
+    renderRest(info.rest);
+
+    if (inCombat) {
+
+        shopLocked = true;
+    }
+
+    applyShopLock();
+}
+
+
+function renderDanger(info) {
+
+    if (!dangerInfo) {
+        return;
+    }
+
+    dangerInfo.innerHTML = "";
+
+    dangerInfo.appendChild(
+        makeEl(
+            "div",
+            info.safe
+                ? "danger-row safe"
+                : "danger-row risky",
+            info.safe
+                ? "🛡️ منطقه‌ی امن: مبارزه‌ی تصادفی ندارد"
+                : "⚠️ منطقه‌ی خطرناک: ممکن است با دشمن روبه‌رو شوی"
+        )
+    );
+
+    const danger =
+        info.danger || {};
+
+    if (danger.miniBoss) {
+
+        dangerInfo.appendChild(
+            makeEl(
+                "div",
+                danger.miniBoss.defeated
+                    ? "danger-row defeated"
+                    : "danger-row mini-boss",
+                danger.miniBoss.defeated
+                    ? `✔️ مینی‌باس «${danger.miniBoss.name}» شکست خورده`
+                    : `⚠️ مینی‌باس: «${danger.miniBoss.name}» در این منطقه پرسه می‌زند`
+            )
+        );
+    }
+
+    if (danger.boss) {
+
+        dangerInfo.appendChild(
+            makeEl(
+                "div",
+                danger.boss.defeated
+                    ? "danger-row defeated"
+                    : "danger-row boss",
+                danger.boss.defeated
+                    ? `✔️ باس «${danger.boss.name}» شکست خورده`
+                    : `👑 باس: «${danger.boss.name}» اینجاست! با تجهیزات کامل بیا`
+            )
+        );
+    }
+
+    if (Number(info.toll) > 0) {
+
+        dangerInfo.appendChild(
+            makeEl(
+                "div",
+                "danger-row toll",
+                `💰 عوارض ورود به اینجا: ${info.toll} طلا`
+            )
+        );
+    }
+}
+
+
+function renderNpcs(npcs) {
+
+    if (!npcList) {
+        return;
+    }
+
+    npcList.innerHTML = "";
+
+    const list =
+        Array.isArray(npcs)
+            ? npcs
+            : [];
+
+    if (!list.length) {
+
+        npcList.appendChild(
+            makeEl(
+                "p",
+                "npc-empty",
+                "کسی اینجا نیست."
+            )
+        );
+
+        return;
+    }
+
+    list.forEach(npc => {
+
+        const row =
+            makeEl("div", "npc-item");
+
+        const head =
+            makeEl("div", "npc-head");
+
+        head.appendChild(
+            makeEl("span", "npc-name", npc.name)
+        );
+
+        if (npc.role) {
+
+            head.appendChild(
+                makeEl("span", "npc-role", npc.role)
+            );
+        }
+
+        row.appendChild(head);
+
+        const services =
+            (npc.services || [])
+                .map(s => NPC_SERVICE_LABELS[s])
+                .filter(Boolean);
+
+        if (services.length) {
+
+            const tags =
+                makeEl("div", "npc-services");
+
+            services.forEach(label => {
+
+                tags.appendChild(
+                    makeEl("span", "npc-tag", label)
+                );
+            });
+
+            row.appendChild(tags);
+        }
+
+        // کلیک: جمله‌ی گفت‌وگو را در ورودی می‌گذارد (بازیکن خودش ارسال می‌کند)
+        row.title =
+            "برای صحبت کلیک کن";
+
+        row.addEventListener(
+            "click",
+            () => {
+
+                if (
+                    messageInput &&
+                    messageSection &&
+                    !messageSection.classList.contains("hidden")
+                ) {
+
+                    messageInput.value =
+                        `با ${npc.name} صحبت می‌کنم و می‌پرسم `;
+
+                    setMobileView("story");
+
+                    messageInput.focus();
+                }
+            }
+        );
+
+        npcList.appendChild(row);
+    });
+}
+
+
+function itemStatText(item) {
+
+    if (item.type === "weapon" && item.attack) {
+        return `+${item.attack} حمله`;
+    }
+
+    if (item.type === "armor" && item.defense) {
+        return `+${item.defense} دفاع`;
+    }
+
+    if (item.type === "potion" && item.effect) {
+        return `+${item.effect} جان`;
+    }
+
+    if (item.type === "mana" && item.effect) {
+        return `+${item.effect} مانا`;
+    }
+
+    return item.effect
+        ? `اثر ${item.effect}`
+        : "";
+}
+
+
+function renderShop(shop, inCombat) {
+
+    if (!shopList) {
+        return;
+    }
+
+    shopList.innerHTML = "";
+
+    if (
+        !shop ||
+        !Array.isArray(shop.items) ||
+        !shop.items.length
+    ) {
+
+        setText(
+            shopTitle,
+            "🏪 فروشگاه"
+        );
+
+        showElement(shopEmpty);
+
+        return;
+    }
+
+    hideElement(shopEmpty);
+
+    setText(
+        shopTitle,
+        `🏪 ${shop.title || "فروشگاه"}`
+    );
+
+    shop.items.forEach(item => {
+
+        const button =
+            makeEl("button", "shop-item shop-row");
+
+        button.type = "button";
+
+        button.dataset.buy =
+            item.key;
+
+        const info =
+            makeEl("div", "shop-row-info");
+
+        info.appendChild(
+            makeEl(
+                "span",
+                "shop-row-name",
+                `${item.icon || ""} ${item.name}`.trim()
+            )
+        );
+
+        const stat =
+            itemStatText(item);
+
+        if (stat) {
+
+            info.appendChild(
+                makeEl("small", "shop-row-stat", stat)
+            );
+        }
+
+        button.appendChild(info);
+
+        const side =
+            makeEl("div", "shop-row-side");
+
+        side.appendChild(
+            makeEl("span", "shop-row-price", `${item.price}G`)
+        );
+
+        if (item.locked) {
+
+            side.appendChild(
+                makeEl("small", "shop-row-lock", `🔒 سطح ${item.minLevel}`)
+            );
+
+            button.classList.add("locked");
+
+        } else if (!item.affordable) {
+
+            side.appendChild(
+                makeEl("small", "shop-row-lock", "طلا کم است")
+            );
+
+            button.classList.add("unaffordable");
+        }
+
+        button.appendChild(side);
+
+        button.dataset.blocked =
+            item.locked || !item.affordable
+                ? "1"
+                : "";
+
+        button.disabled =
+            inCombat ||
+            Boolean(button.dataset.blocked);
+
+        shopList.appendChild(button);
+    });
+}
+
+
+function renderUpgrades(upgrades, inCombat) {
+
+    if (
+        !upgradeSection ||
+        !upgradeList
+    ) {
+        return;
+    }
+
+    upgradeList.innerHTML = "";
+
+    if (!upgrades) {
+
+        hideElement(upgradeSection);
+
+        return;
+    }
+
+    showElement(upgradeSection);
+
+    const gold =
+        Number(lastPlayerGold());
+
+    ["weapon", "armor"].forEach(slot => {
+
+        const up =
+            upgrades[slot];
+
+        if (!up) {
+            return;
+        }
+
+        const statLabel =
+            up.stat === "attack"
+                ? "حمله"
+                : "دفاع";
+
+        const button =
+            makeEl("button", "shop-item shop-row upgrade-row");
+
+        button.type = "button";
+
+        button.dataset.upgrade =
+            slot;
+
+        const info =
+            makeEl("div", "shop-row-info");
+
+        info.appendChild(
+            makeEl(
+                "span",
+                "shop-row-name",
+                `${slot === "weapon" ? "⚔️" : "🛡️"} ${up.name}`
+            )
+        );
+
+        info.appendChild(
+            makeEl(
+                "small",
+                "shop-row-stat",
+                up.atMax
+                    ? `سطح ${up.tier}/${up.maxTier} (حداکثر)`
+                    : `سطح ${up.tier}/${up.maxTier} → +${up.bonus} ${statLabel}`
+            )
+        );
+
+        // نوار سطح ارتقا
+        const pips =
+            makeEl("div", "upgrade-pips");
+
+        for (let i = 0; i < up.maxTier; i++) {
+
+            pips.appendChild(
+                makeEl(
+                    "span",
+                    i < up.tier
+                        ? "pip on"
+                        : "pip"
+                )
+            );
+        }
+
+        info.appendChild(pips);
+
+        button.appendChild(info);
+
+        const side =
+            makeEl("div", "shop-row-side");
+
+        if (up.atMax) {
+
+            side.appendChild(
+                makeEl("span", "shop-row-price max", "✔️ کامل")
+            );
+
+        } else {
+
+            side.appendChild(
+                makeEl("span", "shop-row-price", `${up.cost}G`)
+            );
+
+            if (
+                Number.isFinite(gold) &&
+                gold < up.cost
+            ) {
+
+                side.appendChild(
+                    makeEl("small", "shop-row-lock", "طلا کم است")
+                );
+
+                button.classList.add("unaffordable");
+            }
+        }
+
+        button.appendChild(side);
+
+        button.dataset.blocked =
+            up.atMax ||
+            button.classList.contains("unaffordable")
+                ? "1"
+                : "";
+
+        button.disabled =
+            inCombat ||
+            Boolean(button.dataset.blocked);
+
+        upgradeList.appendChild(button);
+    });
+}
+
+
+function renderRest(rest) {
+
+    if (
+        !restButton ||
+        !rest
+    ) {
+        return;
+    }
+
+    const inn =
+        rest.kind === "inn";
+
+    restButton.textContent =
+        inn
+            ? `🛏️ استراحت در ${rest.label || "مسافرخانه"} (${rest.cost} طلا)`
+            : `⛺ ${rest.label || "اردوی موقت"} (${rest.cost} طلا)`;
+
+    setText(
+        restHint,
+        inn
+            ? "جان و مانا کامل بازیابی می‌شود."
+            : "فقط نصف جان و مانا بازیابی می‌شود؛ برای بازیابی کامل به مسافرخانه‌ی دهکده برو."
+    );
+}
+
+
+/* در مبارزه همه‌ی دکمه‌های فروشگاه/ارتقا قفل‌اند؛ بعد از آن به وضعیت خودشان برمی‌گردند */
+function applyShopLock() {
+
+    [shopList, upgradeList].forEach(list => {
+
+        if (!list) {
+            return;
+        }
+
+        list
+            .querySelectorAll("button")
+            .forEach(button => {
+
+                button.disabled =
+                    shopLocked ||
+                    Boolean(button.dataset.blocked);
+            });
+    });
+}
+
+
+function lastPlayerGold() {
+
+    const goldEl =
+        getElement("playerGold");
+
+    const fromState =
+        lastGameState?.player?.gold;
+
+    if (Number.isFinite(Number(fromState))) {
+        return Number(fromState);
+    }
+
+    if (goldEl) {
+
+        const digits =
+            String(goldEl.textContent || "")
+                .replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d))
+                .replace(/[^0-9]/g, "");
+
+        if (digits) {
+            return Number(digits);
+        }
+    }
+
+    return NaN;
+}
+
+
+function renderEnemyBadge(enemy) {
+
+    const card =
+        enemyBadge?.closest(".enemy-card") ||
+        enemyName?.closest(".enemy-card");
+
+    if (card) {
+
+        card.classList.toggle("is-boss", enemy.type === "boss");
+
+        card.classList.toggle("is-mini-boss", enemy.type === "mini_boss");
+
+        card.classList.toggle("is-enraged", Boolean(enemy.enraged));
+    }
+
+    if (enemyBadge) {
+
+        let label = "";
+
+        if (enemy.type === "boss") {
+            label = "👑 باس";
+        } else if (enemy.type === "mini_boss") {
+            label = "⚠️ مینی‌باس";
+        }
+
+        if (
+            label &&
+            enemy.enraged
+        ) {
+            label += " · 💢 خشمگین";
+        }
+
+        enemyBadge.textContent =
+            label;
+
+        enemyBadge.className =
+            "enemy-badge" +
+            (enemy.type === "boss" ? " boss" : "") +
+            (enemy.type === "mini_boss" ? " mini-boss" : "") +
+            (label ? "" : " hidden");
+    }
+
+    if (enemyDesc) {
+
+        if (enemy.description) {
+
+            enemyDesc.textContent =
+                enemy.description;
+
+            showElement(enemyDesc);
+
+        } else {
+
+            enemyDesc.textContent = "";
+
+            hideElement(enemyDesc);
+        }
+    }
+}
+
+
+// ==================================================
 // COMBAT UI
 // ==================================================
 
@@ -1612,6 +2323,9 @@ function showCombat(combat) {
         enemyLevel,
         enemy.level || 1
     );
+
+
+    renderEnemyBadge(enemy);
 
 
     setText(
@@ -1686,6 +2400,11 @@ function showCombat(combat) {
 
 
 function setShopAvailable(available) {
+
+    shopLocked =
+        !available;
+
+    applyShopLock();
 
     if (shopTabButton) {
 
@@ -1980,6 +2699,25 @@ function handleCombatResponse(data) {
                 `\n🎉 ارتقای سطح! (+${rewards.levelUps} سطح)`;
         }
 
+
+        // جایزه‌ی تجهیزات مینی‌باس / باس
+        if (rewards.lootMessage) {
+
+            text +=
+                `\n${rewards.lootMessage}`;
+        }
+
+
+        // یادداشت‌ها: شکست مینی‌باس/باس، کامل شدن خط اصلی و...
+        if (
+            Array.isArray(rewards.notes) &&
+            rewards.notes.length
+        ) {
+
+            text +=
+                `\n${rewards.notes.join("\n")}`;
+        }
+
         // جان و مانا خودکار پر نمی‌شود؛ بازیکن را راهنمایی می‌کنیم
         const after =
             state?.player ||
@@ -2037,10 +2775,25 @@ function handleCombatResponse(data) {
         data.enemyResult?.defeated
     ) {
 
+        // سرور متن دقیق شکست را می‌فرستد (طلای ازدست‌رفته، جان فعلی، برگشت به دهکده)
+        const defeatText =
+            data.enemyResult.defeatNote ||
+            (data.enemyResult.penalty
+                ? `💀 شکست خوردی و به دهکده‌ی آغازین برگشتی. ${data.enemyResult.penalty.lostGold || 0} طلا از دست دادی و با ${data.enemyResult.penalty.hp || 1} جان بیدار شدی.`
+                : "💀 شکست خوردی و به دهکده‌ی آغازین برگشتی.");
+
         addLogMessage(
             "system",
-            "💀 شخصیتت شکست خورد. می‌توانی بازی را از نو شروع کنی."
+            defeatText
         );
+
+        if (combatResult) {
+
+            setText(
+                combatResult,
+                defeatText
+            );
+        }
     }
 }
 
@@ -3192,61 +3945,108 @@ if (runButton) {
 // SHOP
 // ==================================================
 
-if (shopButtons) {
+// کلیک روی ردیف‌های فروشگاه و ارتقا (event delegation، چون دکمه‌ها پویا ساخته می‌شوند)
 
-    shopButtons.forEach(
-        button => {
-
-            button.addEventListener(
-                "click",
-                async function() {
-
-                    const item =
-                        button.dataset.shop;
+let shopBusy = false;
 
 
-                    if (!item) {
-                        return;
-                    }
+async function shopAction(url, body, fallbackMessage) {
 
+    if (shopBusy) {
+        return;
+    }
 
-                    try {
+    shopBusy = true;
 
-                        const data =
-                            await request(
-                                "/shop/buy",
-                                {
-                                    method: "POST",
+    try {
 
-                                    body:
-                                        JSON.stringify({
-                                            item
-                                        })
-                                }
-                            );
+        const data =
+            await request(
+                url,
+                {
+                    method: "POST",
 
-
-                        addLogMessage(
-                            "system",
-                            data?.message ||
-                            "خرید انجام شد."
-                        );
-
-
-                        updateGameUI(
-                            data?.memory ||
-                            data?.state ||
-                            data
-                        );
-
-                    } catch (error) {
-
-                        addLogMessage(
-                            "system",
-                            `❌ ${error.message}`
-                        );
-                    }
+                    body:
+                        JSON.stringify(body)
                 }
+            );
+
+
+        addLogMessage(
+            "system",
+            data?.message ||
+            fallbackMessage
+        );
+
+
+        updateGameUI(
+            data?.memory ||
+            data?.state ||
+            data
+        );
+
+    } catch (error) {
+
+        addLogMessage(
+            "system",
+            `❌ ${error.message}`
+        );
+
+    } finally {
+
+        shopBusy = false;
+
+        refreshLocationInfo();
+    }
+}
+
+
+if (shopList) {
+
+    shopList.addEventListener(
+        "click",
+        event => {
+
+            const button =
+                event.target.closest("[data-buy]");
+
+            if (
+                !button ||
+                button.disabled
+            ) {
+                return;
+            }
+
+            shopAction(
+                "/shop/buy",
+                { item: button.dataset.buy },
+                "خرید انجام شد."
+            );
+        }
+    );
+}
+
+
+if (upgradeList) {
+
+    upgradeList.addEventListener(
+        "click",
+        event => {
+
+            const button =
+                event.target.closest("[data-upgrade]");
+
+            if (
+                !button ||
+                button.disabled
+            ) {
+                return;
+            }
+
+            shopAction(
+                "/shop/upgrade",
+                { slot: button.dataset.upgrade },
+                "ارتقا انجام شد."
             );
         }
     );
@@ -3279,6 +4079,8 @@ if (restButton) {
                     data?.message ||
                     "استراحت انجام شد."
                 );
+
+                refreshLocationInfo();
 
 
                 updateGameUI(

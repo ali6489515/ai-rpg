@@ -55,7 +55,15 @@ const {
     setDefending,
     setCombatCombo,
     resetCombatCombo,
-    endCombat
+    endCombat,
+
+    bumpTurnsAt,
+    markCombatEnded,
+    markBossDefeated,
+    addStat,
+    upgradeEquipment,
+    completeStoryQuest,
+    applyDefeat
 } = require("./memory/gameMemory");
 const questChoices = require("./memory/questChoices");
 
@@ -63,6 +71,8 @@ const engine = require("./memory/storyEngine");
 
 const timing = require("./memory/timingBar");
 const world = require("./memory/world");
+const content = require("./memory/content");
+const gameplay = require("./memory/gameplay");
 
 
 const app = express();
@@ -88,6 +98,7 @@ app.use((req, res, next) => {
         !req.path.startsWith("/game-state") &&
         !req.path.startsWith("/story-memory") &&
         !req.path.startsWith("/combat-state") &&
+        !req.path.startsWith("/location-info") &&
         !req.path.startsWith("/skills")
     ) {
         return next();
@@ -109,6 +120,8 @@ app.use((req, res, next) => {
         "/run",
         "/rest",
         "/shop/buy",
+        "/shop/upgrade",
+        "/location-info",
         "/reset-game"
     ];
 
@@ -228,7 +241,9 @@ async function narrateAfterCombat(outcome, extra = {}) {
                 ? `بازیکن با موفقیت از مبارزه با «${enemyName}» فرار کرد.`
                 : `بازیکن در مبارزه «${enemyName}» را شکست داد.` +
                   (extra.rewards
-                      ? ` پاداش: ${extra.rewards.xp || 0} تجربه و ${extra.rewards.gold || 0} طلا.`
+                      ? ` پاداش: ${extra.rewards.xp || 0} تجربه و ${extra.rewards.gold || 0} طلا.` +
+                        (extra.rewards.lootMessage ? ` ${extra.rewards.lootMessage}` : "") +
+                        ((extra.rewards.notes || []).length ? ` ${extra.rewards.notes.join(" ")}` : "")
                       : "");
 
         const prompt = `
@@ -858,18 +873,7 @@ function validateEnemy(enemy, playerLevel = 1) {
 
 function giveCombatRewards(enemy) {
 
-    const xp =
-        Math.max(
-            10,
-            enemy.level * 25
-        );
-
-
-    const gold =
-        Math.max(
-            5,
-            enemy.level * 10
-        );
+    const { xp, gold } = gameplay.computeRewards(enemy);
 
 
     const memory =
@@ -978,15 +982,51 @@ function giveCombatRewards(enemy) {
     });
 
 
-    return {
+    // آمار، زمان پایان مبارزه (برای آرامش بین برخوردها)
+    addStat("kills", 1);
+    addStat("goldEarned", gold);
+    markCombatEnded();
 
-        xp,
+    const result = { xp, gold, levelUps, notes: [], lootMessage: null };
 
-        gold,
+    // جایزه‌ی تجهیزات مینی‌باس / باس
+    if (enemy.loot) {
+        const current = loadPermanentMemory();
+        const loot = gameplay.evaluateLoot(enemy.loot, current.equipment);
+        if (loot && loot.better) {
+            if (loot.type === "weapon") {
+                equipWeapon(loot.name, loot.attack);
+                result.lootMessage = `🎁 «${loot.name}» به دست آوردی و تجهیز شد (+${loot.attack} حمله).`;
+            } else {
+                equipArmor(loot.name, loot.defense);
+                result.lootMessage = `🎁 «${loot.name}» به دست آوردی و تجهیز شد (+${loot.defense} دفاع).`;
+            }
+        } else if (loot) {
+            updatePlayer({
+                gold: Number(loadPermanentMemory().player.gold || 0) + loot.sellValue
+            });
+            result.gold += loot.sellValue;
+            result.lootMessage =
+                `🎁 «${loot.name}» از تجهیزات فعلی‌ات بهتر نیست؛ فروختی و ${loot.sellValue} طلا گرفتی.`;
+        }
+    }
 
-        levelUps
+    // مینی‌باس / باس: یک‌بار شکست می‌خورد
+    if (enemy.id) {
+        markBossDefeated(enemy.id);
+        result.notes.push(
+            enemy.type === "boss"
+                ? `👑 باس «${enemy.name}» برای همیشه شکست خورد!`
+                : `🏅 مینی‌باس «${enemy.name}» شکست خورد!`
+        );
+    }
 
-    };
+    // باس نهایی: خط اصلی تازه حالا کامل می‌شود
+    if (enemy.finalBoss && completeStoryQuest()) {
+        result.notes.push(`🏆 خط اصلی «${world.MAIN_STORY.title}» کامل شد!`);
+    }
+
+    return result;
 }
 
 
@@ -1033,10 +1073,40 @@ function enemyTurn() {
         );
 
 
+    // باس‌ها وقتی جانشان کم شد خشمگین می‌شوند و قوی‌تر حمله می‌کنند
+    let enemyAttack = Number(enemy.attack) || 0;
+
+    let enrageNote = "";
+
+    if (
+        enemy.enrageBelow > 0 &&
+        enemy.maxHp > 0 &&
+        enemy.hp / enemy.maxHp <= enemy.enrageBelow
+    ) {
+
+        enemyAttack =
+            Math.round(
+                enemyAttack *
+                (enemy.enrageMult || 1)
+            );
+
+        if (!enemy.enraged) {
+
+            enemy.enraged = true;
+
+            savePermanentMemory(loadPermanentMemory());
+
+            enrageNote =
+                `💢 «${enemy.name}» خشمگین شد! `;
+        }
+    }
+
+    // زره آسیب را کم می‌کند ولی هرگز صفرش نمی‌کند: حداقل ۲۵٪ حمله‌ی دشمن
     let baseDamage =
         Math.max(
             1,
-            enemy.attack -
+            Math.ceil(enemyAttack * 0.25),
+            enemyAttack -
             playerDefense
         );
 
@@ -1080,8 +1150,15 @@ function enemyTurn() {
 
     if (newHp <= 0) {
 
-        endCombat();
+        // شکست: بخشی از طلا از دست می‌رود و با جان کم به دهکده برمی‌گردی
+        const penalty = applyDefeat();
 
+        const defeatNote =
+            `💀 شکست خوردی و بی‌هوش شدی. دهکده‌ای‌ها تو را به دهکده‌ی آغازین رساندند. ` +
+            `${penalty.lostGold} طلا از دست دادی و با ${penalty.hp} جان بیدار شدی. ` +
+            `برای بازیابی کامل در مسافرخانه استراحت کن.`;
+
+        addMessage("system", defeatNote);
 
         return {
 
@@ -1089,8 +1166,12 @@ function enemyTurn() {
 
             damage,
 
+            penalty,
+
+            defeatNote,
+
             message:
-                `دشمن ${damage} آسیب زد. تو شکست خوردی!`
+                `${enrageNote}دشمن ${damage} آسیب زد. تو شکست خوردی!`
 
         };
     }
@@ -1103,9 +1184,10 @@ function enemyTurn() {
         damage,
 
         message:
-            wasDefending
+            enrageNote +
+            (wasDefending
                 ? `با دفاع، فقط ${damage} آسیب دیدی.`
-                : `دشمن ${damage} آسیب زد.`
+                : `دشمن ${damage} آسیب زد.`)
 
     };
 }
@@ -1531,6 +1613,26 @@ app.post(
             const travelTarget =
                 questChoices.detectTravelTarget(memory, message);
 
+            // عوارض ورود به مناطق خاص؛ بدون طلای کافی نمی‌شود وارد شد (قبل از فراخوانی AI)
+            const tollAmount =
+                travelTarget
+                    ? gameplay.tollFor(travelTarget)
+                    : 0;
+
+            if (
+                tollAmount > 0 &&
+                Number(memory.player?.gold || 0) < tollAmount
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        `برای ورود به «${travelTarget}» باید ${tollAmount} طلا عوارض بدهی و طلای کافی نداری. ` +
+                        `با مبارزه در همین منطقه یا مناطق دیگر طلا جمع کن.`
+
+                });
+            }
+
             const clueGate =
                 getClueGate(memory, message, {
                     traveling: Boolean(travelTarget)
@@ -1710,6 +1812,29 @@ app.post(
             }
 
 
+            // پرداخت عوارض بعد از رسیدن موفق
+            if (tollAmount > 0) {
+
+                const gold =
+                    Number(loadPermanentMemory().player?.gold || 0);
+
+                updatePlayer({
+                    gold: Math.max(0, gold - tollAmount)
+                });
+
+                addStat("goldSpent", tollAmount);
+
+                const tollNote =
+                    `\n\n💰 ${tollAmount} طلا عوارض ورود به «${travelTarget}» پرداخت کردی.`;
+
+                responseText += tollNote;
+
+                send({
+                    type: "delta",
+                    text: tollNote
+                });
+            }
+
             if (randomEvent) {
 
                 markRandomEvent(turn);
@@ -1747,7 +1872,9 @@ app.post(
 
             if (storyProgress) {
 
-                const questNote = storyProgress.completed
+                const questNote = storyProgress.finalPending
+                    ? `\n\n📜 آخرین سرنخ پیدا شد: «${storyProgress.clueTitle}»\n🔥 نبرد نهایی نزدیک است؛ آماده باش!`
+                    : storyProgress.completed
                     ? `\n\n🏆 خط اصلی «${world.MAIN_STORY.title}» کامل شد!`
                     : `\n\n📜 سرنخ کلیدی پیدا شد: «${storyProgress.clueTitle}»\n🧭 مأموریت جدید: ${storyProgress.objective}`;
 
@@ -1798,6 +1925,50 @@ app.post(
                 }
             }
 
+
+            /*
+             * برخورد سروری: مبارزه‌ی معمولی، مینی‌باس و باس
+             * (اگر AI خودش مبارزه شروع نکرده باشد)
+             */
+
+            if (!travelTarget) {
+                bumpTurnsAt(
+                    gameplay.currentLocation(
+                        loadPermanentMemory()
+                    )
+                );
+            }
+
+            if (!combatStarted) {
+
+                const encounter =
+                    gameplay.rollEncounter(
+                        loadPermanentMemory(),
+                        { traveling: Boolean(travelTarget) }
+                    );
+
+                if (encounter) {
+
+                    startCombat(encounter.enemy);
+
+                    combatStarted = true;
+
+                    responseText =
+                        engine.stripChoices(
+                            responseText
+                        ) || responseText;
+
+                    const introText =
+                        `\n\n${encounter.intro}`;
+
+                    responseText += introText;
+
+                    send({
+                        type: "delta",
+                        text: introText
+                    });
+                }
+            }
 
             // انتخاب‌های مرتبط با کوئست فعلی (سرور تولید می‌کند)
             // بر اساس مرحله‌ی کوئست + مکان فعلی بازیکن: یا تحقیق در مکان سرنخ، یا قدم بعدی مسیر به آن.
@@ -3717,23 +3888,56 @@ app.post(
             }
 
 
+            // استراحت پولی است: مسافرخانه = بازیابی کامل، اردوی موقت = نصف
+            const option =
+                gameplay.restOption(memory);
+
+            const gold =
+                Number(player.gold || 0);
+
+
+            if (gold < option.cost) {
+
+                return res.status(400).json({
+
+                    error:
+                        `برای استراحت در ${option.label} ${option.cost} طلا لازم است و طلای کافی نداری.`
+
+                });
+            }
+
+
+            updatePlayer({
+                gold: gold - option.cost
+            });
+
+            addStat("goldSpent", option.cost);
+
+
             healPlayer(
-                Number(
-                    player.maxHp || 0
+                Math.ceil(
+                    Number(player.maxHp || 0) *
+                    option.fraction
                 )
             );
-
 
             restoreMana(
-                Number(
-                    player.maxMana || 0
+                Math.ceil(
+                    Number(player.maxMana || 0) *
+                    option.fraction
                 )
             );
+
+
+            const message =
+                option.kind === "inn"
+                    ? `در مسافرخانه استراحت کردی (${option.cost} طلا) و جان و مانایت کامل شد.`
+                    : `اردو زدی و استراحت کردی (${option.cost} طلا)؛ نصف جان و مانایت بازیابی شد. برای بازیابی کامل به مسافرخانه برو.`;
 
 
             addMessage(
                 "system",
-                "استراحت کردی و سلامتی و مانایت بازیابی شد."
+                message
             );
 
 
@@ -3741,8 +3945,7 @@ app.post(
 
                 success: true,
 
-                message:
-                    "استراحت کردی و سلامتی و مانایت بازیابی شد.",
+                message,
 
                 memory:
                     loadPermanentMemory()
@@ -3765,7 +3968,52 @@ app.post(
 
 
 /* =========================
+   LOCATION INFO
+   NPCها، فروشگاه، هزینه‌ی استراحت، ارتقا و خطرهای مکان فعلی
+========================= */
+
+app.get(
+    "/location-info",
+    (req, res) => {
+
+        try {
+
+            const memory =
+                loadPermanentMemory();
+
+            const combat =
+                getCombat();
+
+            return res.json({
+
+                success: true,
+
+                info:
+                    gameplay.locationInfo(memory),
+
+                inCombat:
+                    Boolean(combat && combat.active)
+
+            });
+
+        } catch (error) {
+
+            console.error(error);
+
+            return res.status(500).json({
+
+                error:
+                    "دریافت اطلاعات مکان ممکن نشد."
+
+            });
+        }
+    }
+);
+
+
+/* =========================
    SHOP
+   فروشگاه فقط در مکان‌هایی که فروشنده دارند و خارج از مبارزه باز است.
 ========================= */
 
 app.post(
@@ -3774,92 +4022,16 @@ app.post(
 
         try {
 
-            const item =
-                String(
-                    req.body?.item ||
-                    ""
-                );
+            const combat =
+                getCombat();
 
-
-            const shop = {
-
-                healthPotion: {
-
-                    name:
-                        "معجون درمان",
-
-                    price: 25,
-
-                    type:
-                        "potion",
-
-                    effect:
-                        40
-
-                },
-
-
-                manaPotion: {
-
-                    name:
-                        "معجون مانا",
-
-                    price: 25,
-
-                    type:
-                        "mana",
-
-                    effect:
-                        30
-
-                },
-
-
-                ironSword: {
-
-                    name:
-                        "Iron Sword",
-
-                    price: 150,
-
-                    type:
-                        "weapon",
-
-                    attack:
-                        8
-
-                },
-
-
-                steelArmor: {
-
-                    name:
-                        "Steel Armor",
-
-                    price: 150,
-
-                    type:
-                        "armor",
-
-                    defense:
-                        6
-
-                }
-
-            };
-
-
-            const selected =
-                shop[item];
-
-
-            if (!selected) {
+            if (
+                combat &&
+                combat.active
+            ) {
 
                 return res.status(400).json({
-
-                    error:
-                        "آیتم نامعتبر است."
-
+                    error: "در زمان مبارزه نمی‌توانی خرید کنی."
                 });
             }
 
@@ -3867,88 +4039,124 @@ app.post(
             const memory =
                 loadPermanentMemory();
 
+            const view =
+                gameplay.shopView(memory);
 
-            const player =
-                memory.player;
-
-
-            const gold =
-                Number(
-                    player.gold || 0
-                );
-
-
-            if (
-                gold <
-                selected.price
-            ) {
+            if (!view) {
 
                 return res.status(400).json({
-
-                    error:
-                        "طلای کافی نداری."
-
+                    error: "اینجا فروشنده‌ای نیست. به دهکده یا بازار سرخ برو."
                 });
             }
 
 
+            const key =
+                String(req.body?.item || "");
+
+            const selected =
+                content.ITEMS[key];
+
+            if (
+                !selected ||
+                !view.items.some(i => i.key === key)
+            ) {
+
+                return res.status(400).json({
+                    error: "این کالا اینجا فروخته نمی‌شود."
+                });
+            }
+
+
+            const player =
+                memory.player;
+
+            const level =
+                Number(player.level || 1);
+
+            if (level < (selected.minLevel || 1)) {
+
+                return res.status(400).json({
+                    error: `این کالا برای سطح ${selected.minLevel} به بالا فروخته می‌شود.`
+                });
+            }
+
+
+            const gold =
+                Number(player.gold || 0);
+
+            if (gold < selected.price) {
+
+                return res.status(400).json({
+                    error: "طلای کافی نداری."
+                });
+            }
+
+
+            // خرید تجهیزاتی که از تجهیزات فعلی (با ارتقاها) بهتر نیست، پول هدر می‌دهد
+            if (selected.type === "weapon") {
+
+                const current =
+                    Number(memory.equipment?.weapon?.attack || 0);
+
+                if (selected.attack <= current) {
+
+                    return res.status(400).json({
+                        error: "این سلاح از سلاح فعلی‌ات (با ارتقاها) بهتر نیست."
+                    });
+                }
+
+            } else if (selected.type === "armor") {
+
+                const current =
+                    Number(memory.equipment?.armor?.defense || 0);
+
+                if (selected.defense <= current) {
+
+                    return res.status(400).json({
+                        error: "این زره از زره‌ی فعلی‌ات (با ارتقاها) بهتر نیست."
+                    });
+                }
+            }
+
+
             updatePlayer({
-
-                gold:
-                    gold -
-                    selected.price
-
+                gold: gold - selected.price
             });
+
+            addStat("goldSpent", selected.price);
 
 
             let message =
                 `${selected.name} خریداری شد.`;
 
 
-            if (
-                selected.type ===
-                "weapon"
-            ) {
+            if (selected.type === "weapon") {
 
                 equipWeapon(
                     selected.name,
                     selected.attack
                 );
 
-
                 message =
-                    `${selected.name} خریداری و تجهیز شد (+${selected.attack} Attack).`;
+                    `${selected.name} خریداری و تجهیز شد (+${selected.attack} حمله).`;
 
-            } else if (
-                selected.type ===
-                "armor"
-            ) {
+            } else if (selected.type === "armor") {
 
                 equipArmor(
                     selected.name,
                     selected.defense
                 );
 
-
                 message =
-                    `${selected.name} خریداری و تجهیز شد (+${selected.defense} Defense).`;
+                    `${selected.name} خریداری و تجهیز شد (+${selected.defense} دفاع).`;
 
             } else {
 
                 addItem({
-
-                    name:
-                        selected.name,
-
-                    type:
-                        selected.type,
-
-                    effect:
-                        selected.effect,
-
-                    quantity:
-                        1
-
+                    name: selected.name,
+                    type: selected.type,
+                    effect: selected.effect,
+                    quantity: 1
                 });
             }
 
@@ -3969,10 +4177,121 @@ app.post(
             console.error(error);
 
             return res.status(500).json({
+                error: "خرید ناموفق بود."
+            });
+        }
+    }
+);
 
-                error:
-                    "خرید ناموفق بود."
 
+/* =========================
+   UPGRADE (آهنگر دهکده)
+========================= */
+
+app.post(
+    "/shop/upgrade",
+    (req, res) => {
+
+        try {
+
+            const combat =
+                getCombat();
+
+            if (
+                combat &&
+                combat.active
+            ) {
+
+                return res.status(400).json({
+                    error: "در زمان مبارزه نمی‌توانی ارتقا بدهی."
+                });
+            }
+
+
+            const memory =
+                loadPermanentMemory();
+
+            if (
+                gameplay.currentLocation(memory) !==
+                content.UPGRADE.location
+            ) {
+
+                return res.status(400).json({
+                    error: "ارتقای تجهیزات فقط نزد استاد کاوه در دهکده‌ی آغازین ممکن است."
+                });
+            }
+
+
+            const slot =
+                String(req.body?.slot || "");
+
+            if (
+                slot !== "weapon" &&
+                slot !== "armor"
+            ) {
+
+                return res.status(400).json({
+                    error: "نوع تجهیز نامعتبر است."
+                });
+            }
+
+
+            const info =
+                gameplay.upgradeInfo(memory, slot);
+
+            if (info.atMax) {
+
+                return res.status(400).json({
+                    error: "این تجهیز به بیشترین سطح ارتقا رسیده است."
+                });
+            }
+
+
+            const gold =
+                Number(memory.player?.gold || 0);
+
+            if (gold < info.cost) {
+
+                return res.status(400).json({
+                    error: `برای ارتقا ${info.cost} طلا لازم است.`
+                });
+            }
+
+
+            updatePlayer({
+                gold: gold - info.cost
+            });
+
+            addStat("goldSpent", info.cost);
+
+            upgradeEquipment(slot, info.bonus);
+
+
+            const statLabel =
+                slot === "weapon" ? "حمله" : "دفاع";
+
+            const message =
+                `استاد کاوه «${info.name}» را ارتقا داد (سطح ${info.tier + 1}/${info.maxTier}، +${info.bonus} ${statLabel}) و ${info.cost} طلا گرفت.`;
+
+            addMessage("system", message);
+
+            return res.json({
+
+                success: true,
+
+                message,
+
+                memory:
+                    loadPermanentMemory()
+
+            });
+
+        } catch (error) {
+
+            console.error(error);
+
+            return res.status(500).json({
+                error: "ارتقا ناموفق بود."
             });
         }
     }

@@ -4,6 +4,7 @@ const { AsyncLocalStorage } = require("async_hooks");
 const worldMap = require("./worldMap");
 const world = require("./world");
 const questChoices = require("./questChoices");
+const gameplay = require("./gameplay");
 
 let MongoClient = null;
 try {
@@ -114,13 +115,17 @@ function createDefaultMemory() {
         equipment: {
             weapon: {
                 name: "شمشیر زنگ‌زده",
-                attack: 0
+                attack: 0,
+                tier: 0
             },
             armor: {
                 name: "لباس مسافر",
-                defense: 0
+                defense: 0,
+                tier: 0
             }
         },
+        // پیشرفت گیم‌پلی: باس‌های شکست‌خورده، نوبت‌های حضور در هر منطقه، آمار
+        progress: gameplay.defaultProgress(),
         inventory: [
             {
                 name: "معجون درمان",
@@ -248,6 +253,7 @@ function mergePermanentRaw(saved) {
                 ...(saved.equipment?.armor || {})
             }
         },
+        progress: gameplay.normalizeProgress(saved.progress),
         inventory: Array.isArray(saved.inventory)
             ? normalizeInventory(saved.inventory)
             : defaults.inventory,
@@ -363,7 +369,7 @@ function getStoryQuest(memory) {
  */
 function getClueGate(memory, message, { traveling = false } = {}) {
     const quest = getStoryQuest(memory);
-    if (!quest || quest.completed) return null;
+    if (!quest || quest.completed || quest.finalBossPending) return null;
     const stage = Math.min(Math.max(Number(quest.stage) || 1, 1), world.STAGE_CLUES.length);
     const clue = world.STAGE_CLUES[stage - 1];
     if (!clue) return null;
@@ -423,8 +429,11 @@ function progressStoryQuest(gate, { clueIds = [], narration = "" } = {}) {
         }
 
         const stages = world.MAIN_STORY.stages;
+        let finalPending = false;
         if (gate.stage >= stages.length) {
-            quest.completed = true;
+            // آخرین سرنخ پیدا شد؛ خط اصلی بعد از شکست باس نهایی کامل می‌شود
+            quest.finalBossPending = true;
+            finalPending = true;
         } else {
             quest.stage = gate.stage + 1;
             quest.objective = stages[quest.stage - 1];
@@ -437,12 +446,13 @@ function progressStoryQuest(gate, { clueIds = [], narration = "" } = {}) {
             to: quest.stage,
             objective: quest.objective,
             completed: Boolean(quest.completed),
+            finalPending,
             clueTitle: gate.clue.title
         };
 
         memory.importantEvents.push(
-            result.completed
-                ? `خط اصلی کامل شد: ${gate.clue.title}`
+            result.finalPending
+                ? `آخرین سرنخ پیدا شد؛ نبرد نهایی نزدیک است: ${gate.clue.title}`
                 : `سرنخ کلیدی پیدا شد: ${gate.clue.title} — ${gate.clue.truth}`
         );
         if (memory.importantEvents.length > 50) {
@@ -766,14 +776,14 @@ function removeItem(itemName, quantity) {
 
 function equipWeapon(name, attack) {
     const memory = loadPermanentMemory();
-    memory.equipment.weapon = { name, attack: Number(attack) || 0 };
+    memory.equipment.weapon = { name, attack: Number(attack) || 0, tier: 0 };
     savePermanentMemory(memory);
     return memory.equipment;
 }
 
 function equipArmor(name, defense) {
     const memory = loadPermanentMemory();
-    memory.equipment.armor = { name, defense: Number(defense) || 0 };
+    memory.equipment.armor = { name, defense: Number(defense) || 0, tier: 0 };
     savePermanentMemory(memory);
     return memory.equipment;
 }
@@ -956,7 +966,15 @@ function startCombat(enemy) {
             defense: Number(enemy.defense) || 0,
             level: Number(enemy.level) || 1,
             xp: Number(enemy.xp) || 0,
-            gold: Number(enemy.gold) || 0
+            gold: Number(enemy.gold) || 0,
+            id: enemy.id || null,
+            description: enemy.description || "",
+            enrageBelow: Number(enemy.enrageBelow) || 0,
+            enrageMult: Number(enemy.enrageMult) || 1,
+            enraged: false,
+            loot: enemy.loot || null,
+            extraGold: Number(enemy.extraGold) || 0,
+            finalBoss: Boolean(enemy.finalBoss)
         },
         turn: "player",
         defending: false,
@@ -1047,6 +1065,86 @@ function endCombat() {
     return memory.combat;
 }
 
+/* =========================
+   پیشرفت گیم‌پلی
+========================= */
+
+function updateProgress(mutator) {
+    const memory = loadPermanentMemory();
+    const progress = gameplay.normalizeProgress(memory.progress);
+    mutator(progress);
+    memory.progress = progress;
+    savePermanentMemory(memory);
+    return progress;
+}
+
+function bumpTurnsAt(locationName) {
+    return updateProgress(p => {
+        p.turnsAt[locationName] = (Number(p.turnsAt[locationName]) || 0) + 1;
+    });
+}
+
+function markCombatEnded() {
+    const turn = Number(loadPermanentMemory().turn) || 0;
+    return updateProgress(p => { p.lastCombatTurn = turn; });
+}
+
+function markBossDefeated(id) {
+    const turn = Number(loadPermanentMemory().turn) || 0;
+    return updateProgress(p => { p.defeatedBosses[id] = turn; });
+}
+
+function addStat(key, amount) {
+    return updateProgress(p => {
+        p.stats[key] = (Number(p.stats[key]) || 0) + (Number(amount) || 0);
+    });
+}
+
+/* ارتقای تجهیزات: یک سطح بالاتر + بونوس مشخص */
+function upgradeEquipment(slot, bonus) {
+    const memory = loadPermanentMemory();
+    const eq = memory.equipment[slot];
+    if (!eq) return null;
+    if (slot === "weapon") {
+        eq.attack = (Number(eq.attack) || 0) + bonus;
+    } else {
+        eq.defense = (Number(eq.defense) || 0) + bonus;
+    }
+    eq.tier = (Number(eq.tier) || 0) + 1;
+    savePermanentMemory(memory);
+    return eq;
+}
+
+/* بعد از شکست باس نهایی، خط اصلی کامل می‌شود */
+function completeStoryQuest() {
+    const memory = loadPermanentMemory();
+    const quest = getStoryQuest(memory);
+    if (!quest || quest.completed) return false;
+    quest.completed = true;
+    quest.finalBossPending = false;
+    memory.importantEvents.push(`خط اصلی کامل شد: ${world.MAIN_STORY.title}`);
+    if (memory.importantEvents.length > 50) {
+        memory.importantEvents.splice(0, memory.importantEvents.length - 50);
+    }
+    savePermanentMemory(memory);
+    return true;
+}
+
+/* بعد از شکست: با جان کم به دهکده برمی‌گردی و بخشی از طلا از دست می‌رود */
+function applyDefeat() {
+    const memory = loadPermanentMemory();
+    const penalty = gameplay.defeatPenalty(memory.player);
+    memory.player.gold = penalty.gold;
+    memory.player.hp = penalty.hp;
+    memory.player.mana = Math.min(Number(memory.player.maxMana) || 0, penalty.mana);
+    memory.combat = createEmptyCombat();
+    savePermanentMemory(memory);
+    setLocation(penalty.respawn, "");
+    markCombatEnded();
+    addStat("deaths", 1);
+    return penalty;
+}
+
 function resetGame() {
     const memory = createDefaultMemory();
     savePermanentMemory(memory);
@@ -1100,5 +1198,13 @@ module.exports = {
     setCombatCombo,
     resetCombatCombo,
     endCombat,
-    resetGame
+    resetGame,
+    updateProgress,
+    bumpTurnsAt,
+    markCombatEnded,
+    markBossDefeated,
+    addStat,
+    upgradeEquipment,
+    completeStoryQuest,
+    applyDefeat
 };

@@ -205,9 +205,13 @@
 
                 <div class="enemy-card">
 
+                    <span id="enemyBadge" class="enemy-badge hidden"></span>
+
                     <h2 id="enemyName">
                         Enemy
                     </h2>
+
+                    <p id="enemyDesc" class="enemy-desc hidden"></p>
 
                     <div class="enemy-level">
                         Level <span id="enemyLevel">1</span>
@@ -459,6 +463,12 @@
                     <div id="playerLocation" class="location">
                         دهکده‌ی آغازین
                     </div>
+                    <div id="dangerInfo" class="danger-info"></div>
+                </section>
+
+                <section class="panel" id="npcPanel">
+                    <h2>👥 افراد این مکان</h2>
+                    <div id="npcList" class="npc-list"></div>
                 </section>
 
                 <section class="panel">
@@ -470,6 +480,7 @@
                     <button id="restButton" class="rest-button">
                         🛏️ استراحت و بازیابی
                     </button>
+                    <p id="restHint" class="shop-hint"></p>
                     <button id="resetButton" class="reset-button">
                         🔄 شروع بازی جدید
                     </button>
@@ -521,25 +532,15 @@
             <div class="tab-panel hidden" id="tab-shop">
 
                 <section class="panel" id="shopPanel">
-                    <h2>🏪 فروشگاه</h2>
-                    <p class="shop-hint">فقط خارج از مبارزه می‌توانی خرید کنی.</p>
-                    <div class="shop-list">
-                        <button class="shop-item" data-shop="healthPotion">
-                            🧪 معجون درمان
-                            <span>25G</span>
-                        </button>
-                        <button class="shop-item" data-shop="manaPotion">
-                            💙 معجون مانا
-                            <span>25G</span>
-                        </button>
-                        <button class="shop-item" data-shop="ironSword">
-                            ⚔️ Iron Sword
-                            <span>150G</span>
-                        </button>
-                        <button class="shop-item" data-shop="steelArmor">
-                            🛡️ Steel Armor
-                            <span>150G</span>
-                        </button>
+                    <h2 id="shopTitle">🏪 فروشگاه</h2>
+                    <p class="shop-hint">فقط خارج از مبارزه و در دهکده یا بازار سرخ می‌توانی خرید کنی.</p>
+                    <p id="shopEmpty" class="shop-empty hidden">اینجا فروشنده‌ای نیست. به دهکده‌ی آغازین یا بازار سرخ برو.</p>
+                    <div class="shop-list" id="shopList"></div>
+
+                    <div id="upgradeSection" class="upgrade-section hidden">
+                        <h3>🔨 آهنگر (استاد کاوه)</h3>
+                        <p class="shop-hint">ارتقا هر بار گران‌تر می‌شود (حداکثر ۵ سطح).</p>
+                        <div class="shop-list" id="upgradeList"></div>
                     </div>
                 </section>
 

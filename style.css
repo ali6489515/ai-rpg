@@ -1426,6 +1426,460 @@ button:disabled {
 
 
 /* ========================================
+   LOCATION INFO: خطر، NPCها
+======================================== */
+
+.danger-info {
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 6px;
+
+    margin-top: 10px;
+}
+
+
+.danger-row {
+
+    font-size: 12px;
+
+    padding: 7px 10px;
+
+    border-radius: 8px;
+
+    border-right: 3px solid transparent;
+
+    background: rgba(15, 23, 42, 0.6);
+
+    color: #cbd5e1;
+}
+
+
+.danger-row.safe {
+
+    border-right-color: #22c55e;
+
+    color: #86efac;
+}
+
+
+.danger-row.risky {
+
+    border-right-color: #f59e0b;
+
+    color: #fcd34d;
+}
+
+
+.danger-row.mini-boss {
+
+    border-right-color: #f97316;
+
+    background: rgba(124, 45, 18, 0.35);
+
+    color: #fdba74;
+}
+
+
+.danger-row.boss {
+
+    border-right-color: #ef4444;
+
+    background: rgba(127, 29, 29, 0.45);
+
+    color: #fca5a5;
+
+    font-weight: bold;
+
+    animation: bossPulse 2s ease-in-out infinite;
+}
+
+
+.danger-row.defeated {
+
+    border-right-color: #64748b;
+
+    color: #94a3b8;
+
+    text-decoration: line-through;
+}
+
+
+.danger-row.toll {
+
+    border-right-color: #facc15;
+
+    color: #fde68a;
+}
+
+
+.npc-list {
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 8px;
+}
+
+
+.npc-item {
+
+    padding: 10px 12px;
+
+    border-radius: 10px;
+
+    background: #111827;
+
+    border: 1px solid rgba(148, 163, 184, 0.15);
+
+    cursor: pointer;
+
+    transition: border-color 0.15s, background 0.15s;
+}
+
+
+.npc-item:hover {
+
+    border-color: rgba(165, 180, 252, 0.6);
+
+    background: #172036;
+}
+
+
+.npc-head {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: baseline;
+
+    gap: 8px;
+}
+
+
+.npc-name {
+
+    font-weight: bold;
+
+    color: #e0e7ff;
+}
+
+
+.npc-role {
+
+    font-size: 11px;
+
+    color: #94a3b8;
+}
+
+
+.npc-services {
+
+    display: flex;
+
+    flex-wrap: wrap;
+
+    gap: 4px;
+
+    margin-top: 6px;
+}
+
+
+.npc-tag {
+
+    font-size: 10px;
+
+    padding: 2px 7px;
+
+    border-radius: 999px;
+
+    background: rgba(99, 102, 241, 0.2);
+
+    color: #c7d2fe;
+}
+
+
+.npc-empty,
+.shop-empty {
+
+    font-size: 12px;
+
+    color: #64748b;
+
+    text-align: center;
+
+    padding: 8px 0;
+}
+
+
+/* ========================================
+   SHOP ROWS / UPGRADE
+======================================== */
+
+.shop-row {
+
+    gap: 10px;
+
+    cursor: pointer;
+
+    border: 1px solid rgba(148, 163, 184, 0.12);
+
+    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+
+.shop-row:hover:not(:disabled) {
+
+    background: #1e293b;
+
+    border-color: rgba(250, 204, 21, 0.45);
+}
+
+
+.shop-row:disabled {
+
+    cursor: not-allowed;
+
+    opacity: 0.5;
+}
+
+
+.shop-row-info {
+
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 3px;
+
+    min-width: 0;
+}
+
+
+.shop-row-name {
+
+    font-size: 14px;
+
+    color: #f1f5f9;
+}
+
+
+.shop-row-stat {
+
+    font-size: 11px;
+
+    color: #86efac;
+}
+
+
+.shop-row-side {
+
+    display: flex;
+
+    flex-direction: column;
+
+    align-items: flex-end;
+
+    gap: 3px;
+
+    flex-shrink: 0;
+}
+
+
+.shop-item .shop-row-price {
+
+    color: #facc15;
+
+    font-weight: bold;
+
+    font-size: 13px;
+}
+
+
+.shop-item .shop-row-price.max {
+
+    color: #86efac;
+}
+
+
+.shop-row-lock {
+
+    font-size: 10px;
+
+    color: #f87171;
+}
+
+
+.shop-row.locked .shop-row-name {
+
+    color: #94a3b8;
+}
+
+
+.upgrade-section {
+
+    margin-top: 18px;
+
+    padding-top: 14px;
+
+    border-top: 1px dashed rgba(148, 163, 184, 0.25);
+}
+
+
+.upgrade-section h3 {
+
+    font-size: 15px;
+
+    margin-bottom: 6px;
+
+    color: #fdba74;
+}
+
+
+.upgrade-pips {
+
+    display: flex;
+
+    gap: 3px;
+
+    margin-top: 2px;
+}
+
+
+.upgrade-pips .pip {
+
+    width: 14px;
+
+    height: 5px;
+
+    border-radius: 3px;
+
+    background: #334155;
+}
+
+
+.upgrade-pips .pip.on {
+
+    background: #f97316;
+}
+
+
+/* ========================================
+   BOSS / MINI-BOSS BADGE
+======================================== */
+
+.enemy-card {
+
+    position: relative;
+
+    border: 1px solid transparent;
+}
+
+
+.enemy-badge {
+
+    display: inline-block;
+
+    margin-bottom: 8px;
+
+    padding: 3px 12px;
+
+    border-radius: 999px;
+
+    font-size: 12px;
+
+    font-weight: bold;
+
+    letter-spacing: 0.3px;
+}
+
+
+.enemy-badge.mini-boss {
+
+    background: rgba(249, 115, 22, 0.2);
+
+    color: #fdba74;
+
+    border: 1px solid rgba(249, 115, 22, 0.6);
+}
+
+
+.enemy-badge.boss {
+
+    background: rgba(239, 68, 68, 0.22);
+
+    color: #fecaca;
+
+    border: 1px solid rgba(239, 68, 68, 0.7);
+
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.45);
+}
+
+
+.enemy-card.is-mini-boss {
+
+    border-color: rgba(249, 115, 22, 0.45);
+
+    box-shadow: 0 0 18px rgba(249, 115, 22, 0.15);
+}
+
+
+.enemy-card.is-boss {
+
+    border-color: rgba(239, 68, 68, 0.6);
+
+    box-shadow: 0 0 26px rgba(239, 68, 68, 0.25);
+
+    background:
+        radial-gradient(
+            circle at top,
+            rgba(127, 29, 29, 0.35),
+            rgba(0, 0, 0, 0.2) 70%
+        );
+}
+
+
+.enemy-card.is-enraged h2 {
+
+    color: #f87171;
+
+    animation: bossPulse 1.2s ease-in-out infinite;
+}
+
+
+.enemy-desc {
+
+    font-size: 12px;
+
+    color: #94a3b8;
+
+    margin: 0 auto 10px;
+
+    max-width: 420px;
+
+    line-height: 1.7;
+}
+
+
+#restHint {
+
+    margin-top: 6px;
+}
+
+
+@keyframes bossPulse {
+
+    0%, 100% { opacity: 1; }
+
+    50% { opacity: 0.65; }
+}
+
+
+/* ========================================
    RESPONSIVE
 ======================================== */
 
