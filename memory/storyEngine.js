@@ -186,6 +186,9 @@ function compactState(memory, textPool = "") {
     const currentWorld = world.getLocation(memory.location);
     const worldNeighbors = currentWorld ? world.neighbors(currentWorld.name) : [];
     const storyQuest = (memory.quests || []).find(q => q && q.storyQuest && !q.completed);
+    const stageClue = storyQuest && world.STAGE_CLUES
+        ? world.STAGE_CLUES[(Number(storyQuest.stage) || 1) - 1]
+        : null;
     const bible = memory.storyBible || {};
     const clues = (bible.clues || []).slice(-12)
         .map(c => `${c.id || "?"}|${c.title || "سرنخ"}|${c.status || "کشف‌شده"}|${c.details || ""}`)
@@ -203,6 +206,7 @@ function compactState(memory, textPool = "") {
         `مکان‌های اصلی جهان: ${world.WORLD_LOCATIONS.map(l => l.name).join("، ")}`,
         `مسیرهای مجاز از مکان فعلی: ${worldNeighbors.join("، ") || "—"}`,
         `مرحله‌ی فعلی داستان: ${storyQuest ? storyQuest.objective : "آزاد"}`,
+        `سرنخ کلیدی این مرحله: ${stageClue ? `id=${stageClue.id} (${stageClue.title}) — وقتی بازیکن واقعاً پیدایش کرد، دقیقاً با همین id در storyBible.clues ثبت کن` : "—"}`,
         `نوبت: ${turn + 1}`,
         `بازیکن: ${p.name || "؟"}|${p.class || "؟"}|سطح ${p.level}|HP ${p.hp}/${p.maxHp}|مانا ${p.mana}/${p.maxMana}|حمله ${p.attack}|دفاع ${p.defense}|طلا ${p.gold}`,
         `مکان: ${memory.location || "ناشناخته"}`,
@@ -237,6 +241,8 @@ const STATIC_RULES = `تو Game Master یک بازی RPG فارسی هستی.
 - به خلاصه‌ی داستان و رویدادهای مهم وفادار بمان و با آن‌ها تناقض ایجاد نکن.
 - کتاب مقدس داستان منبع حقیقت ساختاریافته است؛ سرنخ‌ها، رازها و تصمیم‌های ثبت‌شده را حذف یا بازنویسی نکن.
 - اگر بازیکن سرنخ مهمی پیدا کرد، تصمیم مهمی گرفت یا راز تازه‌ای آشکار شد، آن را با شناسه‌ی ثابت در storyBible ثبت کن.
+- پیشروی مأموریت اصلی را سرور انجام می‌دهد: وقتی بازیکن «سرنخ کلیدی این مرحله» را پیدا کرد، آن را با همان id داده‌شده در storyBible.clues ثبت کن؛ خودت مأموریت اصلی را در addQuests نساز و objective آن را تغییر نده.
+- سرنخ کلیدی را بی‌دلیل و زودتر از موقع به بازیکن نده؛ باید نتیجه‌ی جست‌وجو، پرس‌وجو یا تصمیم خود بازیکن باشد.
 
 قانون ایموجی در روایت:
 - در متن داستان هرجا حس صحنه را بهتر می‌کند، از ایموجی مناسب و کم‌حجم استفاده کن (مثلاً مکان، خطر، احساسات، اشیاء).

@@ -212,6 +212,12 @@ function normalizeInventory(list) {
 }
 
 function mergePermanent(saved) {
+    const merged = mergePermanentRaw(saved);
+    try { syncStoryQuest(merged); } catch { /* ignore */ }
+    return merged;
+}
+
+function mergePermanentRaw(saved) {
     const defaults = createDefaultMemory();
     if (!saved || typeof saved !== "object") {
         return defaults;
@@ -311,6 +317,90 @@ function normalizeStoryBible(value) {
         currentArc: source.currentArc ? String(source.currentArc).slice(0, 240) : null,
         lastVerifiedTurn: Number(source.lastVerifiedTurn) || 0
     };
+}
+
+/* =========================
+   پیشروی کوئست اصلی بر اساس سرنخ‌ها
+========================= */
+
+function textKey(value) {
+    return world.locationKey(value);
+}
+
+function evidenceTexts(memory, extra = []) {
+    const bible = memory.storyBible || {};
+    const out = [];
+    for (const c of bible.clues || []) out.push(`${c.title || ""} ${c.details || ""}`);
+    for (const s of bible.secrets || []) out.push(`${s.title || ""} ${s.details || ""}`);
+    for (const e of (memory.importantEvents || []).slice(-30)) {
+        out.push(typeof e === "string" ? e : JSON.stringify(e || ""));
+    }
+    for (const t of extra) if (t) out.push(String(t));
+    return out.map(textKey).filter(Boolean);
+}
+
+/**
+ * مرحله‌ی کوئست اصلی را با سرنخ‌های ثبت‌شده هماهنگ می‌کند. روی خود شیء memory کار می‌کند.
+ * فقط سرنخ «مرحله‌ی فعلی» با کلمات کلیدی تشخیص داده می‌شود تا مرحله‌ای جا نیفتد.
+ * خروجی: null یا { from, to, objective, completed, clueTitle }
+ */
+function syncStoryQuest(memory, extraEvidence = []) {
+    if (!memory || !Array.isArray(memory.quests)) return null;
+    const quest = memory.quests.find(q => q && q.storyQuest);
+    if (!quest || quest.completed) return null;
+
+    const stages = world.MAIN_STORY.stages;
+    const keys = world.STAGE_CLUES;
+    memory.storyBible = normalizeStoryBible(memory.storyBible);
+    const bible = memory.storyBible;
+    const texts = evidenceTexts(memory, extraEvidence);
+
+    const from = Math.min(Math.max(Number(quest.stage) || 1, 1), stages.length);
+    let stage = from;
+    let completed = false;
+    let lastClue = null;
+
+    while (stage <= stages.length) {
+        const key = keys[stage - 1];
+        if (!key) break;
+        let found = bible.clues.some(c => c.id === key.id);
+        if (!found) {
+            const words = key.keywords.map(textKey);
+            const hit = texts.find(t => words.some(w => w && t.includes(w)));
+            if (hit) {
+                bible.clues.push({ id: key.id, title: key.title, status: "کشف‌شده", details: "به‌صورت خودکار از روایت تشخیص داده شد." });
+                found = true;
+            }
+        }
+        if (!found) break;
+        lastClue = key.title;
+        if (stage === stages.length) { completed = true; break; }
+        stage++;
+    }
+
+    quest.stage = stage;
+    quest.objective = stages[stage - 1];
+    quest.completed = completed;
+
+    if (stage === from && !completed) return null;
+    return { from, to: stage, objective: quest.objective, completed, clueTitle: lastClue };
+}
+
+/** نسخه‌ی session-دار: بعد از اعمال تغییرات AI صدا زده می‌شود */
+function progressStoryQuest(extraEvidence = []) {
+    const memory = loadPermanentMemory();
+    const result = syncStoryQuest(memory, extraEvidence);
+    if (result) {
+        const note = result.completed
+            ? `خط اصلی کامل شد: ${result.clueTitle}`
+            : `سرنخ کلیدی پیدا شد (${result.clueTitle}); مرحله‌ی ${result.to}: ${result.objective}`;
+        memory.importantEvents.push(note);
+        if (memory.importantEvents.length > 50) {
+            memory.importantEvents.splice(0, memory.importantEvents.length - 50);
+        }
+    }
+    savePermanentMemory(memory);
+    return result;
 }
 
 function updateStoryBible(patch, turn = 0) {
@@ -649,18 +739,8 @@ function setLocation(location, note = "") {
         memory.location = current.name;
     }
 
-    // پیشروی نرم خط اصلی بر اساس مکان‌هایی که واقعاً کشف شده‌اند.
-    const visitedNames = Object.values(memory.map.locations)
-        .filter(l => l && l.visits > 0)
-        .map(l => l.name);
-    const stage = world.storyStageForVisited(visitedNames);
-    const storyQuest = memory.quests.find(q => q && q.storyQuest);
-    if (storyQuest) {
-        storyQuest.stage = stage;
-        storyQuest.objective = world.MAIN_STORY.stages[stage - 1];
-        storyQuest.completed = stage >= world.MAIN_STORY.stages.length &&
-            memory.location === "دریاچهٔ بی‌صدا";
-    }
+    // پیشروی خط اصلی فقط با سرنخ‌ها انجام می‌شود (syncStoryQuest)، نه با صرفِ رفتن به یک مکان.
+    syncStoryQuest(memory);
 
     savePermanentMemory(memory);
     return memory.location;
@@ -944,6 +1024,8 @@ module.exports = {
     upsertNpc,
     changeReputation,
     updateStoryBible,
+    progressStoryQuest,
+    syncStoryQuest,
     setSummary,
     getActiveSessionId,
     createEmptyCombat,

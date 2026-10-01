@@ -39,6 +39,7 @@ const {
     upsertNpc,
     changeReputation,
     updateStoryBible,
+    progressStoryQuest,
     setSummary,
     getActiveSessionId,
 
@@ -168,7 +169,7 @@ const client = new OpenAI({
 // مدل از .env خوانده می‌شود (AI_MODEL). پیش‌فرض: DeepSeek V4 Flash رایگان Routeway
 const AI_MODEL =
     process.env.AI_MODEL ||
-    "deepseek-v4-flash:free";
+    "gemma-4-26b-a4b-it-meromero:free";
 
 
 /* =========================
@@ -1644,6 +1645,38 @@ app.post(
             if (randomEvent) {
 
                 markRandomEvent(turn);
+            }
+
+
+            /*
+             * پیشروی کوئست اصلی: اگر سرنخ کلیدی مرحله پیدا شد، مرحله‌ی بعد باز می‌شود
+             */
+
+            const changes = aiData.memory || {};
+            const evidence = [
+                typeof changes.importantEvent === "string"
+                    ? changes.importantEvent
+                    : JSON.stringify(changes.importantEvent || ""),
+                ...(Array.isArray(changes.addItems)
+                    ? changes.addItems.map(i => (i && (i.name || "")) + " " + (i && (i.description || "")))
+                    : [])
+            ];
+
+            const storyProgress =
+                progressStoryQuest(evidence);
+
+            if (storyProgress) {
+
+                const questNote = storyProgress.completed
+                    ? `\n\n🏆 خط اصلی «${world.MAIN_STORY.title}» کامل شد!`
+                    : `\n\n📜 سرنخ کلیدی پیدا شد: «${storyProgress.clueTitle}»\n🎯 مأموریت جدید: ${storyProgress.objective}`;
+
+                responseText += questNote;
+
+                send({
+                    type: "delta",
+                    text: questNote
+                });
             }
 
 
